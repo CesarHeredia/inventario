@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDolarPrice } from "../hooks/useDolarPrice";
+import * as api from "../../utils/api";
 
 
 interface Gasto {
@@ -94,22 +95,25 @@ export function Gastos() {
     setUser(parsedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
 
-    // Cargar gastos
-    const savedGastos = localStorage.getItem('gastos');
-    if (savedGastos) {
-      const allGastos = JSON.parse(savedGastos);
-      setGastos(allGastos.filter((g: any) => String(g.usuarioId) === ownerId));
-    }
+    // Cargar gastos de MySQL
+    api.getGastos(ownerId).then(res => {
+      if (res.success) {
+        setGastos(res.gastos.map((g: any) => ({
+          ...g, id: String(g.id), monto: parseFloat(g.monto), tasaDolar: dolarPrice, usuario: parsedUser.usuario
+        })));
+      }
+    });
   }, [navigate]);
 
-  const saveGastos = (updatedGastos: Gasto[]) => {
-    setGastos(updatedGastos);
-    const allGastos = JSON.parse(localStorage.getItem('gastos') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
-
-    const filteredOthers = allGastos.filter((g: any) => String(g.usuarioId) !== ownerId);
-    localStorage.setItem('gastos', JSON.stringify([...filteredOthers, ...updatedGastos]));
+  const refreshGastos = () => {
+    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    api.getGastos(ownerId).then(res => {
+      if (res.success) {
+        setGastos(res.gastos.map((g: any) => ({
+          ...g, id: String(g.id), monto: parseFloat(g.monto), tasaDolar: dolarPrice, usuario: user?.usuario || ''
+        })));
+      }
+    });
   };
 
   const handleAddGasto = (e: React.FormEvent) => {
@@ -127,22 +131,21 @@ export function Gastos() {
     }
 
     const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
-    const nuevoGasto: Gasto = {
-      id: Date.now().toString(),
+    
+    api.addGasto({
+      usuarioId: ownerId,
       descripcion: gastoForm.descripcion,
       monto: parseFloat(gastoForm.monto),
       moneda: gastoForm.moneda,
-      fecha: new Date().toISOString(),
-      usuario: user?.usuario || '',
-      tasaDolar: dolarPrice,
-      usuarioId: ownerId, // DUEÑO (String)
-    };
-
-    saveGastos([...gastos, nuevoGasto]);
-
-    toast.success('Gasto registrado exitosamente');
-    setGastoForm({ descripcion: "", monto: "", moneda: "bolivares" });
-    setIsAddGastoDialogOpen(false);
+      fecha: new Date().toISOString()
+    })
+    .then(() => {
+        toast.success('Gasto registrado exitosamente');
+        refreshGastos();
+        setGastoForm({ descripcion: "", monto: "", moneda: "bolivares" });
+        setIsAddGastoDialogOpen(false);
+    })
+    .catch(() => toast.error('Error al registrar gasto'));
   };
 
   const handleDeleteGasto = (id: string) => {
@@ -150,9 +153,12 @@ export function Gastos() {
       return;
     }
 
-    const updatedGastos = gastos.filter(g => g.id !== id);
-    saveGastos(updatedGastos);
-    toast.success('Gasto eliminado');
+    api.deleteGasto(id)
+        .then(() => {
+            toast.success('Gasto eliminado');
+            refreshGastos();
+        })
+        .catch(() => toast.error('Error al eliminar gasto'));
   };
 
   const totalGastos = gastos.reduce((acc, g) => acc + (g.moneda === 'dolares' ? g.monto * g.tasaDolar : g.monto), 0);

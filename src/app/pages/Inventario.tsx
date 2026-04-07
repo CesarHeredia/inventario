@@ -24,6 +24,7 @@ import {
 import { Package, Plus, ArrowLeft, Edit, Trash2, DollarSign, Building2, Search, Save, X, User as UserIcon, UserCog, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { useDolarPrice } from "../hooks/useDolarPrice";
+import * as api from "../../utils/api";
 
 interface Product {
   id: string;
@@ -91,8 +92,6 @@ export function Inventario() {
   });
 
   useEffect(() => {
-    // Cargar productos del localStorage
-    // Determinar el dueño de la data (el Jefe actual)
     const storedUser = localStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
@@ -102,37 +101,64 @@ export function Inventario() {
     setUser(parsedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
 
-    const savedProducts = localStorage.getItem('products');
-    if (savedProducts) {
-      const allProducts = JSON.parse(savedProducts);
-      // AISLAMIENTO ESTRICTO: Solo lo propio
-      const userProducts = allProducts.filter((p: any) => 
-        String(p.usuarioId) === ownerId
-      );
-      
-      // Migrar productos antiguos (Se les setea usuarioId con ownerId al cargarlos localmente)
-      const migratedProducts = userProducts.map((product: Product) => ({
-        ...product,
-        unidadMedida: product.unidadMedida || 'unidad',
-        monedaCompra: product.monedaCompra || 'Bs',
-        monedaVenta: product.monedaVenta || '$',
-        usuarioId: String(product.usuarioId || ownerId)
-      }));
-      setProducts(migratedProducts);
-    }
+    // Cargar productos de la base de datos MySQL
+    api.getInventario(ownerId)
+      .then(response => {
+        if (response.success) {
+          const mappedProducts = response.productos.map((p: any) => ({
+            id: String(p.id),
+            nombre: p.nombre,
+            descripcion: p.descripcion || "",
+            cantidad: parseFloat(p.cantidad),
+            unidadMedida: p.unidadMedida,
+            precioCompra: parseFloat(p.costoBolivares),
+            monedaCompra: 'Bs',
+            precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : undefined,
+            monedaVenta: '$',
+            categoria: p.categoria || "General",
+            tipo: p.tipo,
+            fechaRegistro: p.fechaCreacion,
+            usuarioId: String(p.usuarioId)
+          }));
+          setProducts(mappedProducts);
+        }
+      })
+      .catch(error => {
+        console.error("Error al cargar inventario:", error);
+        toast.error("Error al conectar con la base de datos");
+        
+        // Fallback a localStorage si falla la API (opcional, mejor no para evitar confusiones)
+        const savedProducts = localStorage.getItem('products');
+        if (savedProducts) {
+          const allProducts = JSON.parse(savedProducts);
+          const userProducts = allProducts.filter((p: any) => String(p.usuarioId) === ownerId);
+          setProducts(userProducts);
+        }
+      });
   }, [navigate]);
 
-  const saveProducts = (updatedProducts: Product[]) => {
-    setProducts(updatedProducts);
-    
-    // Al guardar en localStorage, debemos persistir TODO, pero manteniendo el usuarioId
-    const allProducts = JSON.parse(localStorage.getItem('products') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
-
-    // Reemplazar solo los del usuario actual en la lista global
-    const filteredOthers = allProducts.filter((p: any) => String(p.usuarioId) !== ownerId);
-    localStorage.setItem('products', JSON.stringify([...filteredOthers, ...updatedProducts]));
+  const refreshInventory = () => {
+    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    api.getInventario(ownerId).then(response => {
+      if (response.success) {
+        const mappedProducts = response.productos.map((p: any) => ({
+          id: String(p.id),
+          nombre: p.nombre,
+          descripcion: p.descripcion || "",
+          cantidad: parseFloat(p.cantidad),
+          unidadMedida: p.unidadMedida,
+          precioCompra: parseFloat(p.costoBolivares),
+          monedaCompra: 'Bs',
+          precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : undefined,
+          monedaVenta: '$',
+          categoria: p.categoria || "General",
+          tipo: p.tipo,
+          fechaRegistro: p.fechaCreacion,
+          usuarioId: String(p.usuarioId)
+        }));
+        setProducts(mappedProducts);
+      }
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -148,16 +174,14 @@ export function Inventario() {
           return;
         }
 
-        const updatedProduct: Product = {
-          ...existingProduct,
-          cantidad: existingProduct.cantidad + parseFloat(formData.cantidadAgregar || "0"),
-          precioCompra: formData.precioCompra ? parseFloat(formData.precioCompra) : existingProduct.precioCompra,
-          precioVenta: formData.precioVenta ? parseFloat(formData.precioVenta) : existingProduct.precioVenta,
-          usuarioId: existingProduct.usuarioId // Mantener el dueño
-        };
-        const updatedProducts = products.map(p => p.id === selectedExistingProduct ? updatedProduct : p);
-        saveProducts(updatedProducts);
-        toast.success(`Se agregaron ${formData.cantidadAgregar} unidades a ${existingProduct.nombre}`);
+        const newCantidad = existingProduct.cantidad + parseFloat(formData.cantidadAgregar || "0");
+        api.updateProducto(existingProduct.id, newCantidad)
+          .then(() => {
+            toast.success(`Se agregaron ${formData.cantidadAgregar} unidades a ${existingProduct.nombre}`);
+            refreshInventory();
+          })
+          .catch(() => toast.error("Error al actualizar stock"));
+        
         resetForm();
         setIsDialogOpen(false);
         return;
@@ -202,35 +226,31 @@ export function Inventario() {
     }
 
     const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
-    const productData: Product = {
-      id: editingProduct?.id || Date.now().toString(),
-      nombre: formData.nombre,
-      descripcion: formData.descripcion,
-      cantidad: finalCantidad,
-      unidadMedida: finalUnidadMedida as 'unidad' | 'paquete' | 'kilo',
-      precioCompra: finalPrecioCompra,
-      monedaCompra: formData.monedaCompra as '$' | 'Bs',
-      precioVenta: formData.tipo === 'venta' && formData.precioVenta ? parseFloat(formData.precioVenta) : undefined,
-      monedaVenta: formData.tipo === 'venta' && formData.monedaVenta ? formData.monedaVenta as '$' | 'Bs' : undefined,
-      categoria: formData.categoria,
-      tipo: formData.tipo as 'venta' | 'servicio',
-      fechaRegistro: editingProduct?.fechaRegistro || new Date().toISOString(),
-      oferta: editingProduct?.oferta,
-      usuarioId: String(editingProduct?.usuarioId || ownerId), // DUEÑO (String)
-    };
-
-    let updatedProducts;
     if (editingProduct) {
-      // Actualizar producto existente desde el modo edición
-      updatedProducts = products.map(p => p.id === editingProduct.id ? productData : p);
-      toast.success('Producto actualizado exitosamente');
+        api.updateProducto(editingProduct.id, finalCantidad)
+            .then(() => {
+                toast.success('Producto actualizado exitosamente');
+                refreshInventory();
+            })
+            .catch(() => toast.error('Error al actualizar producto'));
     } else {
-      // Agregar nuevo producto
-      updatedProducts = [...products, productData];
-      toast.success('Producto agregado exitosamente');
+        api.addProducto({
+            usuarioId: ownerId,
+            nombre: formData.nombre,
+            tipo: formData.tipo as 'venta' | 'servicio',
+            unidadMedida: finalUnidadMedida as 'unit' | 'paquete' | 'kilo',
+            cantidad: finalCantidad,
+            costoBolivares: finalPrecioCompra,
+            precioVentaDolares: formData.tipo === 'venta' && formData.precioVenta ? parseFloat(formData.precioVenta) : undefined,
+            tasaDolar: dolarPrice
+        })
+        .then(() => {
+            toast.success('Producto agregado exitosamente');
+            refreshInventory();
+        })
+        .catch(() => toast.error('Error al agregar producto'));
     }
 
-    saveProducts(updatedProducts);
     resetForm();
     setIsDialogOpen(false);
   };
@@ -256,9 +276,12 @@ export function Inventario() {
 
   const handleDelete = (id: string) => {
     if (confirm('¿Estás seguro de eliminar este producto?')) {
-      const updatedProducts = products.filter(p => p.id !== id);
-      saveProducts(updatedProducts);
-      toast.success('Producto eliminado');
+      api.deleteProducto(id)
+        .then(() => {
+          toast.success('Producto eliminado');
+          refreshInventory();
+        })
+        .catch(() => toast.error('Error al eliminar producto'));
     }
   };
 

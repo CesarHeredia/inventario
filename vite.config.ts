@@ -13,7 +13,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost/www/django/clinica_moya/inventario/api',
+        target: 'http://localhost/www/django/clinica_moya/inventario/inventario/api',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner";
 import { DolarPriceWidget } from "../components/DolarPriceWidget";
 import { useDolarPrice } from "../hooks/useDolarPrice";
+import * as api from "../../utils/api";
 
 interface User {
   usuario: string;
@@ -97,10 +98,9 @@ export function Dashboard() {
 
     const syncProfile = async () => {
       try {
-        const usuariosResp = await fetch('/api/usuarios.php');
-        const data = await usuariosResp.json();
-        if (data.success) {
-          const dbUser = data.users.find((u: any) => u.usuario === parsedUser.usuario);
+        const res = await api.getAllUsuarios();
+        if (res.success) {
+          const dbUser = res.users.find((u: any) => u.usuario === parsedUser.usuario);
           if (dbUser) {
             const updated = { 
               ...parsedUser, 
@@ -123,73 +123,59 @@ export function Dashboard() {
     setUser(parsedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
 
-    const inventarioStr = localStorage.getItem('products');
-    if (inventarioStr) {
-      const allProducts = JSON.parse(inventarioStr);
-      const productos = allProducts.filter((p: any) => 
-        String(p.usuarioId) === ownerId
-      );
-      setTotalProducts(productos.length);
-      const inventoryValue = productos.reduce((acc: number, p: any) => acc + (p.cantidad * (p.precioVenta || 0)), 0);
-      setTotalInventarioValue(inventoryValue);
-    }
+    // Cargar Inventario
+    api.getInventario(ownerId).then(res => {
+      if (res.success) {
+        setTotalProducts(res.productos.length);
+        const inventoryValue = res.productos.reduce((acc: number, p: any) => acc + (parseFloat(p.cantidad) * (parseFloat(p.precioVentaDolares) || 0)), 0);
+        setTotalInventarioValue(inventoryValue);
+      }
+    });
 
-    // Contar servicios
-    const serviciosStr = localStorage.getItem('services');
-    if (serviciosStr && inventarioStr) {
-      const allServs = JSON.parse(serviciosStr);
-      const servs = allServs.filter((s: any) => String(s.usuarioId) === ownerId) as Service[];
-      setTotalServices(servs.length);
-    }
+    // Cargar Servicios
+    api.getServicios(ownerId).then(res => {
+      if (res.success) {
+        setTotalServices(res.servicios.length);
+      }
+    });
 
-    const savedVentas = localStorage.getItem('ventas');
-    if (savedVentas) {
-      const allSales = JSON.parse(savedVentas);
-      const userSales = allSales.filter((v: any) => String(v.usuarioId) === ownerId);
-      let sumBs = 0;
-      let sumUsd = 0;
-      const currentSafeDolarPrice = dolarPrice || 1;
-      userSales.forEach((venta: any) => {
-        const total = parseFloat(venta.total) || 0;
-        if (venta.moneda === 'Bs') {
-          sumBs += total;
-          sumUsd += total / (venta.tasaDolar || currentSafeDolarPrice);
-        } else {
+    // Cargar Ventas
+    api.getVentas(ownerId).then(res => {
+      if (res.success) {
+        let sumBs = 0;
+        let sumUsd = 0;
+        const currentSafeDolarPrice = dolarPrice || 1;
+        
+        res.ventas.forEach((venta: any) => {
+          const total = parseFloat(venta.total) || 0;
+          // Asumimos que total en DB está en la moneda de la venta. 
+          // Si no hay campo 'moneda' en DB 'ventas', asumimos Dólares o Bolívares según lógica.
+          // En database_schema.sql, la tabla 'ventas' no tiene columna 'moneda'.
+          // Asumiremos que el 'total' es el monto final en la moneda que se guardó.
+          // Por simplicidad, trataremos todo como USD si no se especifica.
           sumUsd += total;
-          sumBs += total * (venta.tasaDolar || currentSafeDolarPrice);
-        }
-      });
-      setTotalVentasBs(sumBs);
-      setTotalVentasUsd(sumUsd);
-    }
+          sumBs += total * currentSafeDolarPrice;
+        });
+        setTotalVentasBs(sumBs);
+        setTotalVentasUsd(sumUsd);
+      }
+    });
 
-    // Calcular total de gastos
-    const savedGastos = localStorage.getItem('gastos');
-    if (savedGastos) {
-      const allGastos = JSON.parse(savedGastos);
-      const userGastos = allGastos.filter((g: any) => String(g.usuarioId) === ownerId);
-      const total = userGastos.reduce((acc: number, gasto: any) => acc + (parseFloat(gasto.monto) || 0), 0);
-      setTotalGastos(total);
-    }
+    // Cargar Gastos
+    api.getGastos(ownerId).then(res => {
+      if (res.success) {
+        const total = res.gastos.reduce((acc: number, gasto: any) => acc + (parseFloat(gasto.monto) || 0), 0);
+        setTotalGastos(total);
+      }
+    });
 
-    // Contar promociones (Combos)
-    const savedCombos = localStorage.getItem('combos');
-    if (savedCombos) {
-      const allCombos = JSON.parse(savedCombos);
-      setTotalPromociones(allCombos.filter((c: any) => String(c.usuarioId) === ownerId).length);
-    }
-
-    // Contar ofertas individuales
-    const savedProducts = localStorage.getItem('products');
-    const savedServices = localStorage.getItem('services');
-    let ofertasCount = 0;
-    if (savedProducts) {
-      ofertasCount += JSON.parse(savedProducts).filter((p: any) => p.oferta?.activa).length;
-    }
-    if (savedServices) {
-      ofertasCount += JSON.parse(savedServices).filter((s: any) => s.oferta?.activa).length;
-    }
-    setTotalOfertas(ofertasCount);
+    // Cargar Promociones
+    api.getPromociones(ownerId).then(res => {
+      if (res.success) {
+        setTotalPromociones(res.promociones.length);
+        setTotalOfertas(res.promociones.filter((p: any) => p.activo).length);
+      }
+    });
   }, [navigate, dolarPrice]);
 
   const handleLogout = () => {

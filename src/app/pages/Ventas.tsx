@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDolarPrice } from "../hooks/useDolarPrice";
+import * as api from "../../utils/api";
 
 import {
   Select,
@@ -198,68 +199,66 @@ export function Ventas() {
     setUser(parsedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
 
-    // Cargar productos (Filtrados por dueño o huérfanos)
-    const savedProducts = localStorage.getItem('products');
-    if (savedProducts) {
-      const allProducts = JSON.parse(savedProducts);
-      setProducts(allProducts.filter((p: any) => String(p.usuarioId) === ownerId && p.tipo === 'venta' && p.cantidad > 0));
-    }
+    // Cargar productos de MySQL
+    api.getInventario(ownerId).then(res => {
+      if (res.success) {
+        setProducts(res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
+          ...p,
+          id: String(p.id),
+          cantidad: parseFloat(p.cantidad),
+          precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0,
+          usuarioId: String(p.usuarioId)
+        })));
+      }
+    });
 
-    // Cargar servicios (Filtrados por dueño o huérfanos)
-    const savedServices = localStorage.getItem('services');
-    if (savedServices) {
-      const allServices = JSON.parse(savedServices);
-      setServices(allServices.filter((s: any) => String(s.usuarioId) === ownerId));
-    }
+    // Cargar servicios de MySQL
+    api.getServicios(ownerId).then(res => {
+      if (res.success) {
+        setServices(res.servicios.map((s: any) => ({
+          ...s,
+          id: String(s.id),
+          nombre: s.nombreServicio,
+          precioVenta: parseFloat(s.costoBolivares) / dolarPrice, // Convertir a dólares si es necesario
+          usuarioId: String(s.usuarioId)
+        })));
+      }
+    });
 
-    // Cargar ventas
-    const savedSales = localStorage.getItem('ventas');
-    if (savedSales) {
-      const allSales = JSON.parse(savedSales);
-      setSales(allSales.filter((s: any) => String(s.usuarioId) === ownerId));
-    }
+    // Cargar ventas de MySQL
+    api.getVentas(ownerId).then(res => {
+      if (res.success) {
+        setSales(res.ventas.map((v: any) => ({
+          ...v,
+          id: String(v.id),
+          total: parseFloat(v.total),
+          usuarioId: String(v.usuarioId)
+        })));
+      }
+    });
 
-    // Cargar combos (Filtrados por dueño o huérfanos)
+    // Cargar combos de localStorage (no hay tabla MySQL para esto aún)
     const savedCombos = localStorage.getItem('combos');
     if (savedCombos) {
       const allCombos = JSON.parse(savedCombos);
       setCombos(allCombos.filter((c: any) => String(c.usuarioId) === ownerId && c.activa));
     }
-  }, [navigate]);
+  }, [navigate, dolarPrice]);
 
-  const saveSales = (updatedSales: Sale[]) => {
-    setSales(updatedSales);
-    const allSales = JSON.parse(localStorage.getItem('ventas') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
-
-    const filteredOthers = allSales.filter((s: any) => String(s.usuarioId) !== ownerId);
-    localStorage.setItem('ventas', JSON.stringify([...filteredOthers, ...updatedSales]));
-  };
-
-  const saveProducts = (updatedProducts: Product[]) => {
-    // Aquí actualizamos el estado local (que ya está filtrado)
-    setProducts(updatedProducts.filter(p => p.tipo === 'venta' && p.cantidad > 0));
-    
-    // Para el localStorage, debemos fusionar con los productos de otros dueños
-    const allProducts = JSON.parse(localStorage.getItem('products') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
-    
-    const filteredOthers = allProducts.filter((p: any) => String(p.usuarioId) !== ownerId);
-    localStorage.setItem('products', JSON.stringify([...filteredOthers, ...updatedProducts]));
-  };
-
-  const saveServices = (updatedServices: Service[]) => {
-    setServices(updatedServices);
-    
-    // Fusionar con servicios de otros dueños
-    const allServices = JSON.parse(localStorage.getItem('services') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
-    
-    const filteredOthers = allServices.filter((s: any) => String(s.usuarioId) !== ownerId);
-    localStorage.setItem('services', JSON.stringify([...filteredOthers, ...updatedServices]));
+  const refreshData = () => {
+    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    api.getInventario(ownerId).then(res => {
+        if (res.success) {
+            setProducts(res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
+                ...p, id: String(p.id), cantidad: parseFloat(p.cantidad), precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0
+            })));
+        }
+    });
+    api.getVentas(ownerId).then(res => {
+        if (res.success) {
+            setSales(res.ventas.map((v: any) => ({ ...v, id: String(v.id), total: parseFloat(v.total) })));
+        }
+    });
   };
 
   const addProductToCart = (product: Product) => {
@@ -436,89 +435,56 @@ export function Ventas() {
     }
 
     const appliesIVA = checkoutForm.metodoPago === 'tarjeta_bolivares';
-    const ivaAmountUsd = appliesIVA ? cartTotal * 0.16 : 0;
-    const grandTotalUsd = cartTotal + ivaAmountUsd;
-
-    const moneda = checkoutForm.metodoPago === 'efectivo_dolares' ? '$' : 'Bs';
-    const totalCobrado = moneda === '$' ? grandTotalUsd : grandTotalUsd * dolarPrice;
-
     const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
-    const nuevaVenta: Sale = {
-      id: Date.now().toString(),
-      items: cart,
-      subtotal: cartTotal,
-      iva: ivaAmountUsd,
-      total: totalCobrado,
-      moneda: moneda,
-      metodoPago: checkoutForm.metodoPago,
-      cliente: {
-        nombre: checkoutForm.clienteNombre || undefined,
-        telefono: checkoutForm.clienteTelefono || undefined,
-        email: checkoutForm.clienteEmail || undefined,
-      },
-      fecha: new Date().toISOString(),
-      usuario: user?.usuario || '',
-      tasaDolar: dolarPrice,
-      usuarioId: ownerId, // DUEÑO (SIEMPRE String)
-    };
+    
+    // Registrar cada producto vendido individualmente en la tabla de ventas
+    const salePromises = cart.map(item => {
+      const itemSubtotal = item.subtotal;
+      const itemIva = appliesIVA ? itemSubtotal * 0.16 : 0;
+      const itemTotal = itemSubtotal + itemIva;
+      
+      return api.addVenta({
+        usuarioId: ownerId,
+        producto: item.nombre,
+        cantidad: item.cantidad,
+        precioUnitario: item.precioUnitario,
+        subtotal: itemSubtotal,
+        iva: itemIva,
+        total: itemTotal,
+        metodoPago: checkoutForm.metodoPago,
+        fecha: new Date().toISOString()
+      });
+    });
 
-    saveSales([...sales, nuevaVenta]);
-
-    // Actualizar inventario (Descontar productos directos y/o materiales usados por los servicios)
-    const updatedInventario = products.map((producto) => {
-      let totalDeduction = 0;
-
-      cart.forEach((item) => {
-        // Descontar si el producto se vendió directo
-        if (item.tipo === 'producto' && item.originalId === producto.id) {
-          totalDeduction += item.cantidad;
-        }
-        
-        // Descontar si el producto fue usado como material para un servicio
-        if (item.tipo === 'servicio') {
-          const serviceProfile = services.find(s => s.id === item.originalId);
-          if (serviceProfile && serviceProfile.productosUsados) {
-            const mat = serviceProfile.productosUsados.find(pu => pu.productoId === producto.id);
-            if (mat) {
-              totalDeduction += (mat.cantidad * item.cantidad);
-            }
+    Promise.all(salePromises).then(() => {
+      // Actualizar inventario (restar stock en la base de datos)
+      const updatePromises: Promise<any>[] = [];
+      cart.forEach(item => {
+        if (item.tipo === 'producto') {
+          const product = products.find(p => p.id === item.originalId);
+          if (product) {
+            const newCantidad = product.cantidad - item.cantidad;
+            updatePromises.push(api.updateProducto(product.id, newCantidad));
           }
         }
       });
 
-      if (totalDeduction > 0) {
-        return {
-          ...producto,
-          cantidad: Math.max(0, producto.cantidad - totalDeduction),
-        };
-      }
-      return producto;
+      return Promise.all(updatePromises);
+    }).then(() => {
+      toast.success('Venta procesada exitosamente');
+      refreshData();
+      setCart([]);
+      setCheckoutForm({
+        clienteNombre: "",
+        clienteTelefono: "",
+        clienteEmail: "",
+        metodoPago: 'efectivo_dolares' as any,
+      });
+      setIsCheckoutDialogOpen(false);
+    }).catch(error => {
+      console.error("Error al procesar venta:", error);
+      toast.error('Error al procesar la venta en el servidor');
     });
-    
-    // Incrementar cantidadPrestados de los servicios
-    const updatedServices = services.map((servicio) => {
-      const soldServiceCartItem = cart.find(item => item.tipo === 'servicio' && item.originalId === servicio.id);
-      if (soldServiceCartItem) {
-        return { ...servicio, cantidadPrestados: (servicio.cantidadPrestados || 0) + soldServiceCartItem.cantidad };
-      }
-      return servicio;
-    });
-
-    // Guardado Seguro (Sin machacar datos de otros)
-    saveProducts(updatedInventario);
-    saveServices(updatedServices);
-
-    // Limpiar formulario
-    setCart([]);
-    setCheckoutForm({
-      clienteNombre: "",
-      clienteTelefono: "",
-      clienteEmail: "",
-      metodoPago: 'efectivo_dolares',
-    });
-    setIsCheckoutDialogOpen(false);
-
-    toast.success('Venta procesada exitosamente');
   };
 
   const handleRefund = (sale: Sale) => {
@@ -526,62 +492,29 @@ export function Ventas() {
       return;
     }
 
-    // Restaurar el inventario (Productos directos y/o materiales usados en servicios)
-    const allProducts = JSON.parse(localStorage.getItem('products') || '[]');
-    const currentServices = JSON.parse(localStorage.getItem('services') || '[]');
-    
-    const updatedProducts = allProducts.map((product: Product) => {
-      let totalRestoration = 0;
-      
-      sale.items.forEach(item => {
-        if (item.tipo === 'producto' && item.originalId === product.id) {
-          totalRestoration += item.cantidad;
+    // Restaurar el inventario para productos
+    const updatePromises = sale.items.map(item => {
+      if (item.tipo === 'producto') {
+        const product = products.find(p => p.id === item.originalId);
+        if (product) {
+          const newCantidad = product.cantidad + item.cantidad;
+          return api.updateProducto(product.id, newCantidad);
         }
-        
-        if (item.tipo === 'servicio') {
-          const serviceProfile = currentServices.find((s: Service) => s.id === item.originalId);
-          if (serviceProfile && serviceProfile.productosUsados) {
-            const mat = serviceProfile.productosUsados.find((pu: any) => pu.productoId === product.id);
-            if (mat) {
-              totalRestoration += (mat.cantidad * item.cantidad);
-            }
-          }
-        }
-      });
-      
-      if (totalRestoration > 0) {
-        return {
-          ...product,
-          cantidad: product.cantidad + totalRestoration,
-        };
       }
-      return product;
-    });
-    
-    // De-incrementar los servicios prestados
-    const updatedRefundServices = currentServices.map((servicio: Service) => {
-       const soldServiceCartItem = sale.items.find(item => item.tipo === 'servicio' && item.originalId === servicio.id);
-       if (soldServiceCartItem) {
-         return { ...servicio, cantidadPrestados: Math.max(0, (servicio.cantidadPrestados || 0) - soldServiceCartItem.cantidad) };
-       }
-       return servicio;
+      return Promise.resolve();
     });
 
-    // Eliminar la venta
-    const updatedSales = sales.filter(s => s.id !== sale.id);
-    
-    // Guardado Seguro
-    saveSales(updatedSales);
-    saveProducts(updatedProducts);
-    saveServices(updatedRefundServices);
-
-    // Recargar items
-    setProducts(updatedProducts.filter((p: Product) => p.tipo === 'venta' && p.cantidad > 0));
-    setServices(updatedRefundServices);
-
-    setIsRefundDialogOpen(false);
-    setSelectedSaleForRefund(null);
-    toast.success('Reembolso procesado exitosamente');
+    Promise.all(updatePromises)
+      .then(() => {
+        toast.success('Reembolso procesado exitosamente');
+        refreshData();
+        setIsRefundDialogOpen(false);
+        setSelectedSaleForRefund(null);
+      })
+      .catch(error => {
+        console.error("Error al procesar reembolso:", error);
+        toast.error('Error al procesar el reembolso');
+      });
   };
 
   const cartTotal = cart.reduce((acc, item) => acc + item.subtotal, 0);

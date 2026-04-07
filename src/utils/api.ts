@@ -3,7 +3,7 @@
 const isProduction = import.meta.env.PROD;
 const API_BASE_URL = isProduction 
   ? '/api' 
-  : `http://localhost/www/django/clinica_moya/inventario/api`;
+  : `http://localhost/www/django/clinica_moya/inventario/inventario/api`;
 
 // Helper para hacer peticiones
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
@@ -57,11 +57,11 @@ export async function register(userData: {
 // ==================== USUARIOS API ====================
 
 export async function getAllUsuarios() {
-  return fetchAPI('/usuarios', { method: 'GET' });
+  return fetchAPI('/usuarios.php', { method: 'GET' });
 }
 
 export async function getUsuarioById(id: string) {
-  return fetchAPI(`/usuarios/${id}`, { method: 'GET' });
+  return fetchAPI(`/usuarios.php?id=${id}`, { method: 'GET' });
 }
 
 // ==================== TRABAJADORES API ====================
@@ -102,34 +102,34 @@ export async function updateTrabajadorRol(id: string, rol: string) {
 // ==================== INVENTARIO API ====================
 
 export async function getInventario(userId: string) {
-  return fetchAPI(`/inventario/${userId}`, { method: 'GET' });
+  return fetchAPI(`/inventario.php?userId=${userId}`, { method: 'GET' });
 }
 
 export async function addProducto(productoData: {
   usuarioId: string;
   nombre: string;
   tipo: 'venta' | 'servicio';
-  unidadMedida: 'unidad' | 'paquete' | 'kilo';
+  unidadMedida: 'unit' | 'paquete' | 'kilo';
   cantidad: number;
   costoBolivares: number;
   precioVentaDolares?: number;
   tasaDolar: number;
 }) {
-  return fetchAPI('/inventario', {
+  return fetchAPI('/inventario.php', {
     method: 'POST',
     body: JSON.stringify(productoData),
   });
 }
 
 export async function updateProducto(id: string, cantidad: number) {
-  return fetchAPI(`/inventario/${id}`, {
+  return fetchAPI(`/inventario.php?id=${id}`, {
     method: 'PUT',
     body: JSON.stringify({ cantidad }),
   });
 }
 
 export async function deleteProducto(id: string) {
-  return fetchAPI(`/inventario/${id}`, {
+  return fetchAPI(`/inventario.php?id=${id}`, {
     method: 'DELETE',
   });
 }
@@ -137,7 +137,7 @@ export async function deleteProducto(id: string) {
 // ==================== VENTAS API ====================
 
 export async function getVentas(userId: string) {
-  return fetchAPI(`/ventas/${userId}`, { method: 'GET' });
+  return fetchAPI(`/ventas.php?userId=${userId}`, { method: 'GET' });
 }
 
 export async function addVenta(ventaData: {
@@ -151,7 +151,7 @@ export async function addVenta(ventaData: {
   metodoPago?: string;
   fecha: string;
 }) {
-  return fetchAPI('/ventas', {
+  return fetchAPI('/ventas.php', {
     method: 'POST',
     body: JSON.stringify(ventaData),
   });
@@ -160,7 +160,7 @@ export async function addVenta(ventaData: {
 // ==================== SERVICIOS API ====================
 
 export async function getServicios(userId: string) {
-  return fetchAPI(`/servicios/${userId}`, { method: 'GET' });
+  return fetchAPI(`/servicios.php?userId=${userId}`, { method: 'GET' });
 }
 
 export async function addServicio(servicioData: {
@@ -171,16 +171,29 @@ export async function addServicio(servicioData: {
   fecha: string;
   descripcion?: string;
 }) {
-  return fetchAPI('/servicios', {
+  return fetchAPI('/servicios.php', {
     method: 'POST',
     body: JSON.stringify(servicioData),
+  });
+}
+
+export async function updateServicio(id: string, data: any) {
+  return fetchAPI(`/servicios.php?id=${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteServicio(id: string) {
+  return fetchAPI(`/servicios.php?id=${id}`, {
+    method: 'DELETE',
   });
 }
 
 // ==================== GASTOS API ====================
 
 export async function getGastos(userId: string) {
-  return fetchAPI(`/gastos/${userId}`, { method: 'GET' });
+  return fetchAPI(`/gastos.php?userId=${userId}`, { method: 'GET' });
 }
 
 export async function addGasto(gastoData: {
@@ -191,9 +204,15 @@ export async function addGasto(gastoData: {
   categoria?: string;
   fecha: string;
 }) {
-  return fetchAPI('/gastos', {
+  return fetchAPI('/gastos.php', {
     method: 'POST',
     body: JSON.stringify(gastoData),
+  });
+}
+
+export async function deleteGasto(id: string) {
+  return fetchAPI(`/gastos.php?id=${id}`, {
+    method: 'DELETE',
   });
 }
 // ==================== PROMOCIONES API ====================
@@ -202,7 +221,7 @@ export async function getPromociones(usuarioId: string) {
   return fetchAPI(`/promociones.php?usuarioId=${usuarioId}`, { method: 'GET' });
 }
 
-export async function createPromoción(promocionData: {
+export async function createPromocion(promocionData: {
   usuarioId: string;
   nombre: string;
   tipoOferta: '2x1' | 'descuento_porcentual' | 'precio_fijo';

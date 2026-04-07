@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDolarPrice } from "../hooks/useDolarPrice";
+import * as api from "../../utils/api";
 
 import {
   Select,
@@ -139,31 +140,46 @@ export function Servicios() {
     setUser(parsedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
 
-    // Cargar servicios del localStorage (Filtrados por dueño o huérfanos)
-    const savedServices = localStorage.getItem('services');
-    if (savedServices) {
-      const allServices = JSON.parse(savedServices);
-      setServices(allServices.filter((s: any) => String(s.usuarioId) === ownerId));
-    }
+    // Cargar servicios de MySQL
+    api.getServicios(ownerId).then(res => {
+      if (res.success) {
+        setServices(res.servicios.map((s: any) => ({
+          id: String(s.id),
+          nombre: s.nombreServicio,
+          descripcion: s.descripcion || "",
+          costo: parseFloat(s.costoBolivares),
+          precioVenta: (parseFloat(s.costoBolivares) * 1.5) / dolarPrice, // Valor por defecto si no hay precio de venta en DB
+          categoria: s.categoria || "Gral",
+          cantidadPrestados: 0,
+          fechaRegistro: s.fecha,
+          productosUsados: [],
+          usuarioId: String(s.usuarioId)
+        })));
+      }
+    });
 
-    // Cargar productos del localStorage (Filtrados por dueño o huérfanos)
-    const savedProducts = localStorage.getItem('products');
-    if (savedProducts) {
-      const allProducts = JSON.parse(savedProducts);
-      setProducts(allProducts.filter((p: any) => String(p.usuarioId) === ownerId));
-    }
-  }, [navigate]);
+    // Cargar productos de MySQL
+    api.getInventario(ownerId).then(res => {
+      if (res.success) {
+        setProducts(res.productos.map((p: any) => ({
+          ...p, id: String(p.id), cantidad: parseFloat(p.cantidad), precioCompra: parseFloat(p.costoBolivares)
+        })));
+      }
+    });
+  }, [navigate, dolarPrice]);
 
-  const saveServices = (updatedServices: Service[]) => {
-    setServices(updatedServices);
-    
-    // Persistencia global en localStorage
-    const allServices = JSON.parse(localStorage.getItem('services') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-    const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
-
-    const filteredOthers = allServices.filter((s: any) => String(s.usuarioId) !== ownerId);
-    localStorage.setItem('services', JSON.stringify([...filteredOthers, ...updatedServices]));
+  const refreshServices = () => {
+    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    api.getServicios(ownerId).then(res => {
+      if (res.success) {
+        setServices(res.servicios.map((s: any) => ({
+          id: String(s.id), nombre: s.nombreServicio, descripcion: s.descripcion || "",
+          costo: parseFloat(s.costoBolivares), precioVenta: 10, categoria: s.categoria || "Gral",
+          cantidadPrestados: 0, fechaRegistro: s.fecha, productosUsados: [],
+          usuarioId: String(s.usuarioId)
+        })));
+      }
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -199,30 +215,34 @@ export function Servicios() {
        : 0;
 
     const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
-    const serviceData: Service = {
-      id: editingService?.id || Date.now().toString(),
-      nombre: formData.nombre,
-      descripcion: formData.descripcion,
-      costo: costoFinal,
-      precioVenta: parseFloat(formData.precioVenta),
-      categoria: formData.categoria,
-      cantidadPrestados: editingService?.cantidadPrestados || 0,
-      fechaRegistro: editingService?.fechaRegistro || new Date().toISOString(),
-      productosUsados: usaInventario ? formData.productosUsados : [],
-      oferta: editingService?.oferta,
-      usuarioId: String(editingService?.usuarioId || ownerId), // DUEÑO (String)
-    };
-
-    let updatedServices;
+    
     if (editingService) {
-      updatedServices = services.map(s => s.id === editingService.id ? serviceData : s);
-      toast.success('Servicio actualizado exitosamente');
+        api.updateServicio(editingService.id, {
+            nombreServicio: formData.nombre,
+            descripcion: formData.descripcion,
+            costoBolivares: costoFinal,
+            categoria: formData.categoria
+        })
+        .then(() => {
+            toast.success('Servicio actualizado exitosamente');
+            refreshServices();
+        })
+        .catch(() => toast.error('Error al actualizar servicio'));
     } else {
-      updatedServices = [...services, serviceData];
-      toast.success('Servicio agregado exitosamente');
+        api.addServicio({
+            usuarioId: ownerId,
+            nombreServicio: formData.nombre,
+            costoBolivares: costoFinal,
+            fecha: new Date().toISOString(),
+            descripcion: formData.descripcion
+        })
+        .then(() => {
+            toast.success('Servicio agregado exitosamente');
+            refreshServices();
+        })
+        .catch(() => toast.error('Error al agregar servicio'));
     }
 
-    saveServices(updatedServices);
     resetForm();
     setIsDialogOpen(false);
   };
@@ -247,9 +267,12 @@ export function Servicios() {
 
   const handleDelete = (id: string) => {
     if (confirm('¿Estás seguro de eliminar este servicio?')) {
-      const updatedServices = services.filter(s => s.id !== id);
-      saveServices(updatedServices);
-      toast.success('Servicio eliminado');
+      api.deleteServicio(id)
+        .then(() => {
+          toast.success('Servicio eliminado');
+          refreshServices();
+        })
+        .catch(() => toast.error('Error al eliminar servicio'));
     }
   };
 
