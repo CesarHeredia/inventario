@@ -93,7 +93,7 @@ elseif ($method === 'PUT') {
         echo json_encode(["success" => true, "message" => "Estado actualizado"]);
     } elseif ($action === 'rol') {
         $rol = $data['rol'];
-        if (!in_array($rol, ['trabajador', 'jefe'])) {
+        if (!in_array($rol, ['trabajador', 'jefe', 'subjefe'])) {
             http_response_code(400);
             echo json_encode(["success" => false, "message" => "Rol inválido"]);
             exit();

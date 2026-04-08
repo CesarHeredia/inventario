@@ -86,64 +86,47 @@ export function Database() {
     const parsedUser = JSON.parse(storedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
 
-    // Cargar usuarios desde la API
+    // 1. Usuarios (Jefe ve sus trabajadores)
     try {
-      const usersData = await api.getAllUsuarios();
-      if (usersData && Array.isArray(usersData)) {
-        // El Jefe solo ve a sus trabajadores
-        if (parsedUser.rol === 'jefe') {
-          setUsuarios(usersData.filter((u: any) => String(u.jefeId) === String(parsedUser.id)));
-        } else if (parsedUser.rol === 'trabajador') {
-          setUsuarios(usersData.filter((u: any) => String(u.jefeId) === String(parsedUser.jefeId) || String(u.id) === String(parsedUser.id)));
-        } else {
-          setUsuarios(usersData); // Admin ve todos
-        }
+      if (parsedUser.rol === 'jefe') {
+        const workers = await api.getTrabajadores(parsedUser.id);
+        if (Array.isArray(workers)) setUsuarios(workers);
+      } else if (parsedUser.rol === 'admin') {
+        const allUsers = await api.getAllUsuarios();
+        if (Array.isArray(allUsers)) setUsuarios(allUsers);
       }
-    } catch (error) {
-      console.error("Error al cargar usuarios:", error);
-      const localUsers = localStorage.getItem('users');
-      if (localUsers) {
-        const parsed = JSON.parse(localUsers);
-        if (parsedUser.rol === 'jefe') {
-          setUsuarios(parsed.filter((u: any) => String(u.jefeId) === String(parsedUser.id)));
-        } else if (parsedUser.rol === 'trabajador') {
-          setUsuarios(parsed.filter((u: any) => String(u.jefeId) === String(parsedUser.jefeId) || String(u.id) === String(parsedUser.id)));
-        } else {
-          setUsuarios(parsed);
-        }
-      }
-    }
+    } catch (e) { console.error("Error cargando usuarios", e); }
 
-    // Cargar otros datos (Filtrados por dueño o huérfanos - STRING)
-    const productsData = localStorage.getItem('products');
-    if (productsData) {
-      const all = JSON.parse(productsData);
-      setProductos(all.filter((i: any) => String(i.usuarioId) === ownerId));
-    }
+    // 2. Inventario
+    try {
+      const inv = await api.getInventario(ownerId);
+      if (inv.success) setProductos(inv.productos);
+    } catch (e) { console.error("Error cargando inventario", e); }
 
-    const servicesData = localStorage.getItem('services');
-    if (servicesData) {
-      const all = JSON.parse(servicesData);
-      setServicios(all.filter((i: any) => String(i.usuarioId) === ownerId));
-    }
+    // 3. Servicios
+    try {
+      const serv = await api.getServicios(ownerId);
+      if (serv.success) setServicios(serv.servicios);
+    } catch (e) { console.error("Error cargando servicios", e); }
 
-    const salesData = localStorage.getItem('ventas');
-    if (salesData) {
-      const all = JSON.parse(salesData);
-      setVentas(all.filter((i: any) => String(i.usuarioId) === ownerId));
-    }
+    // 4. Ventas
+    try {
+      const v = await api.getVentas(ownerId);
+      if (v.success) setVentas(v.ventas);
+    } catch (e) { console.error("Error cargando ventas", e); }
 
-    const expensesData = localStorage.getItem('gastos');
-    if (expensesData) {
-      const all = JSON.parse(expensesData);
-      setGastos(all.filter((i: any) => String(i.usuarioId) === ownerId));
-    }
+    // 5. Gastos
+    try {
+      const g = await api.getGastos(ownerId);
+      if (Array.isArray(g)) setGastos(g);
+      else if (g.success) setGastos(g.gastos);
+    } catch (e) { console.error("Error cargando gastos", e); }
 
-    const savedCombos = localStorage.getItem('combos');
-    if (savedCombos) {
-      const all = JSON.parse(savedCombos);
-      setCombos(all.filter((i: any) => String(i.usuarioId) === ownerId));
-    }
+    // 6. Combos/Promociones
+    try {
+      const p = await api.getPromociones(ownerId);
+      if (p.success) setCombos(p.promociones);
+    } catch (e) { console.error("Error cargando promociones", e); }
   };
 
   const exportData = () => {
@@ -170,30 +153,28 @@ export function Database() {
           Tipo: p.tipo,
           Cantidad: p.cantidad,
           Unidad: p.unidadMedida,
-          Costo_Bs: p.precioCompra,
-          Precio_Venta_USD: p.precioVenta || 0,
-          Oferta: p.oferta?.activa ? `${p.oferta.valor}% OFF` : 'Ninguna',
-          Fecha_Registro: formatDate(p.fechaRegistro)
+          Costo: p.costoBolivares,
+          Moneda_Costo: p.monedaCompra || 'Bs',
+          Precio_Venta_USD: p.precioVentaDolares || 0,
+          Moneda_Venta: p.monedaVenta || '$',
+          Fecha_Registro: formatDate(p.fechaCreacion)
         }));
 
         const cleanServices = servicios.map(s => ({
-          Nombre: s.nombre,
-          Descripción: s.descripcion,
-          Costo_Bs: s.costo || 0,
-          Precio_Venta_USD: s.precioVenta,
-          Oferta: s.oferta?.activa ? `${s.oferta.valor}% OFF` : 'Ninguna',
+          Nombre: s.nombreServicio,
+          Costo: s.costoBolivares || 0,
+          Venta: s.precioVenta || 0,
+          Moneda_Venta: s.monedaVenta || '$',
           Categoría: s.categoria,
-          Materiales_Usados: s.productosUsados?.length || 0,
-          Fecha_Registro: formatDate(s.fechaRegistro || new Date().toISOString())
+          Fecha: formatDate(s.fecha)
         }));
 
         const cleanCombos = combos.map(c => ({
           Nombre: c.nombre,
-          Precio_Combo_USD: c.precioCombo,
-          Items: c.items.map((i: any) => `${i.cantidad}x ${i.nombre}`).join(' + '),
-          Ahorro_Estimado_USD: c.items.reduce((acc: number, i: any) => acc + (i.precioBase * i.cantidad), 0) - c.precioCombo,
-          Estado: c.activa ? 'Activo' : 'Inactivo',
-          Fecha: formatDate(c.fecha)
+          Items: c.items?.map((i: any) => `${i.cantidad}x ${i.nombre}`).join(' + ') || '',
+          Estado: c.activo ? 'Activo' : 'Inactivo',
+          FechaInicio: c.fechaInicio,
+          FechaFin: c.fechaFin
         }));
 
         const cleanVentas = ventas.map(v => ({
@@ -267,31 +248,29 @@ export function Database() {
   }
 
   // --- Analíticas Computadas (Resumen) ---
-  const ventasBs = ventas.filter(v => v.moneda === 'Bs');
-  const ventasUsd = ventas.filter(v => v.moneda !== 'Bs');
-  const gastosBs = gastos.filter(g => g.moneda === 'bolivares');
-  const gastosUsd = gastos.filter(g => g.moneda === 'dolares');
+  const safeDolarPrice = dolarPrice && dolarPrice > 0 ? dolarPrice : 60;
 
-  const safeDolarPrice = dolarPrice && dolarPrice > 0 ? dolarPrice : 36.5;
+  // 1. Ingresos Reales (Ventas en Bs y $)
+  const totalIngresosBsValue = ventas.reduce((sum, v) => {
+    const total = parseFloat(v.total) || 0;
+    const tasa = parseFloat(v.tasaDolar) || safeDolarPrice;
+    return sum + (v.moneda === 'Bs' ? total : total * tasa);
+  }, 0);
 
-  const totalIngresosBs = ventasBs.reduce((sum, v) => sum + (parseFloat(v.total) || 0), 0) + 
-                          ventasUsd.reduce((sum, v) => sum + (parseFloat(v.total) || 0), 0) * safeDolarPrice;
-
-  // Calculo real de gasto puro extra para la UI tarjeta central (opcional mantener para info)
-  // 1. Gastos Mensuales (Luz, Agua, etc.)
-  const totalGastosPurosBs = gastosBs.reduce((sum, g) => sum + (parseFloat(g.monto) || 0), 0) +
-                             gastosUsd.reduce((sum, g) => sum + (parseFloat(g.monto) || 0), 0) * safeDolarPrice;
+  // 2. Gastos Puros (Módulo Gastos)
+  const totalGastosPurosBs = gastos.reduce((sum, g) => {
+    const monto = parseFloat(g.monto) || 0;
+    const esBs = g.moneda === 'bolivares' || g.moneda === 'Bs';
+    return sum + (esBs ? monto : monto * safeDolarPrice);
+  }, 0);
   
-  // 2. Inversión en Inventario = SUMA(Stock Actual * Costo de Compra) de todos los productos
+  // 3. Inversión en Inventario (Costo de Stock Actual)
   const costoInventarioBs = productos.reduce((sum, p) => {
-    const precioCompra = parseFloat(p.precioCompra) || 0;
-    const stockActual = parseFloat(p.cantidad) || 0;
-    
-    // Normalizar detección de moneda
-    const esBolivares = p.monedaCompra === 'Bs' || p.monedaCompra === 'bolivares';
-    const costoBs = esBolivares ? precioCompra : precioCompra * safeDolarPrice;
-    
-    return sum + (costoBs * stockActual);
+    const cost = parseFloat(p.costoBolivares) || 0;
+    const qty = parseFloat(p.cantidad) || 0;
+    const esBs = p.monedaCompra === 'Bs' || !p.monedaCompra;
+    const costInBs = esBs ? cost : cost * safeDolarPrice;
+    return sum + (costInBs * qty);
   }, 0);
   
   const totalEgresosBs = totalGastosPurosBs + costoInventarioBs;
@@ -578,20 +557,20 @@ export function Database() {
                   <TrendingUp className="h-5 w-5 text-green-600" />
                 </CardHeader>
                 <CardContent className="pt-4">
-                  <div className="text-2xl font-black text-green-700">Bs {formatPrice(totalIngresosBs)}</div>
-                  <p className="text-sm font-bold text-gray-500 mt-1">$ {formatPrice(totalIngresosBs / dolarPrice)}</p>
+                  <div className="text-2xl font-black text-green-700">Bs {formatPrice(totalIngresosBsValue)}</div>
+                  <p className="text-sm font-bold text-gray-500 mt-1">$ {formatPrice(totalIngresosBsValue / safeDolarPrice)}</p>
                 </CardContent>
               </Card>
               
               <Card className="border-2 border-orange-500 shadow-md">
                 <CardHeader className="flex flex-row items-center justify-between pb-2 bg-orange-50">
-                  <CardTitle className="text-sm font-bold text-orange-900">Total de Costos</CardTitle>
+                  <CardTitle className="text-sm font-bold text-orange-900">Inversión (Stock)</CardTitle>
                   <Package className="h-5 w-5 text-orange-600" />
                 </CardHeader>
                 <CardContent className="pt-4">
                   <div className="text-2xl font-black text-orange-700">Bs {formatPrice(costoInventarioBs)}</div>
-                  <p className="text-sm font-bold text-gray-500 mt-1">$ {formatPrice(costoInventarioBs / dolarPrice)}</p>
-                  <p className="text-[10px] text-gray-500 mt-2 leading-tight">Total gastado en inventario (Stock actual y vendido)</p>
+                  <p className="text-sm font-bold text-gray-500 mt-1">$ {formatPrice(costoInventarioBs / safeDolarPrice)}</p>
+                  <p className="text-[10px] text-gray-500 mt-2 leading-tight">Valor total en inventario a costo de compra</p>
                 </CardContent>
               </Card>
 
@@ -602,8 +581,8 @@ export function Database() {
                 </CardHeader>
                 <CardContent className="pt-4">
                   <div className="text-2xl font-black text-red-700">Bs {formatPrice(totalGastosPurosBs)}</div>
-                  <p className="text-sm font-bold text-gray-500 mt-1">$ {formatPrice(totalGastosPurosBs / dolarPrice)}</p>
-                  <p className="text-[10px] text-gray-500 mt-2 leading-tight">Total proveniente del módulo de Gastos</p>
+                  <p className="text-sm font-bold text-gray-500 mt-1">$ {formatPrice(totalGastosPurosBs / safeDolarPrice)}</p>
+                  <p className="text-[10px] text-gray-500 mt-2 leading-tight">Total acumulado del módulo de Gastos</p>
                 </CardContent>
               </Card>
             </div>
@@ -646,42 +625,42 @@ export function Database() {
                 </Card>
 
                 <div className="grid grid-cols-1 gap-6">
-                  <Card className="border-2 border-blue-200 h-full">
-                    <CardHeader className="bg-blue-50 border-b-2 border-blue-200">
-                      <CardTitle className="text-lg font-bold flex items-center gap-2 text-blue-900">
-                        <Receipt className="h-5 w-5" />
-                        Desglose de Ventas por Moneda
-                      </CardTitle>
-                      <CardDescription>Total cobrado sumado por dólares y bolívares</CardDescription>
-                    </CardHeader>
-                    <CardContent className="pt-6">
-                      <div className="space-y-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-bold text-gray-500">Total liquidado en Bolívares</p>
-                            <p className="text-3xl font-black text-blue-700">
-                              Bs {formatPrice(ventasBs.reduce((acc, v) => acc + (v.total || 0), 0))}
-                            </p>
-                          </div>
-                          <div className="bg-blue-100 p-3 rounded-full">
-                            <Activity className="h-6 w-6 text-blue-600" />
-                          </div>
+                <Card className="border-2 border-blue-200">
+                  <CardHeader className="bg-blue-50 border-b-2 border-blue-200">
+                    <CardTitle className="text-lg font-bold flex items-center gap-2 text-blue-900">
+                      <Receipt className="h-5 w-5" />
+                      Desglose de Ventas por Moneda
+                    </CardTitle>
+                    <CardDescription>Total cobrado sumado por dólares y bolívares</CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-gray-500">Total liquidado en Bolívares</p>
+                          <p className="text-3xl font-black text-blue-700">
+                            Bs {formatPrice(ventas.filter(v => v.moneda === 'Bs').reduce((acc, v) => acc + (parseFloat(v.total) || 0), 0))}
+                          </p>
                         </div>
-                        <div className="border-t-2 border-gray-100"></div>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-bold text-gray-500">Total liquidado en Dólares</p>
-                            <p className="text-3xl font-black text-green-700">
-                              $ {formatPrice(ventasUsd.reduce((acc, v) => acc + (v.total || 0), 0))}
-                            </p>
-                          </div>
-                          <div className="bg-green-100 p-3 rounded-full">
-                            <DollarSign className="h-6 w-6 text-green-600" />
-                          </div>
+                        <div className="bg-blue-100 p-3 rounded-full">
+                          <Activity className="h-6 w-6 text-blue-600" />
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
+                      <div className="border-t-2 border-gray-100"></div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-bold text-gray-500">Total liquidado en Dólares</p>
+                          <p className="text-3xl font-black text-green-700">
+                            $ {formatPrice(ventas.filter(v => v.moneda !== 'Bs').reduce((acc, v) => acc + (parseFloat(v.total) || 0), 0))}
+                          </p>
+                        </div>
+                        <div className="bg-green-100 p-3 rounded-full">
+                          <DollarSign className="h-6 w-6 text-green-600" />
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
                 </div>
               </div>
 
@@ -796,38 +775,22 @@ export function Database() {
                         <TableHead>Nombre</TableHead>
                         <TableHead>Categoría</TableHead>
                         <TableHead>Stock</TableHead>
-                        <TableHead>P. Venta ($)</TableHead>
-                        <TableHead>Oferta</TableHead>
-                        <TableHead>Inversión (Bs)</TableHead>
-                        <TableHead>Fecha</TableHead>
+                        <TableHead>Costo</TableHead>
+                        <TableHead>Precio Venta</TableHead>
+                        <TableHead>Registro</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {productos.map((producto) => {
-                        const esBolivares = producto.monedaCompra === 'Bs' || producto.monedaCompra === 'bolivares';
-                        const costoUnitarioBs = esBolivares ? (producto.precioCompra || 0) : (producto.precioCompra || 0) * safeDolarPrice;
-                        return (
-                          <TableRow key={producto.id}>
-                            <TableCell className="font-medium text-blue-900">{producto.nombre}</TableCell>
-                            <TableCell>{producto.categoria}</TableCell>
-                            <TableCell>{producto.cantidad} {producto.unidadMedida}</TableCell>
-                            <TableCell>$ {formatPrice(producto.precioVenta || 0)}</TableCell>
-                            <TableCell>
-                              {producto.oferta?.activa ? (
-                                <span className="bg-rose-500 text-white px-2 py-0.5 rounded-full text-[10px] font-black border border-rose-600 shadow-sm animate-pulse">
-                                  {producto.oferta.valor}% OFF
-                                </span>
-                              ) : (
-                                <span className="text-gray-300">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>Bs {formatPrice(costoUnitarioBs * producto.cantidad)}</TableCell>
-                            <TableCell className="text-xs text-gray-400">
-                              {formatDate(producto.fechaRegistro)}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {productos.map((producto, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="font-medium">{producto.nombre}</TableCell>
+                          <TableCell>{producto.categoria}</TableCell>
+                          <TableCell>{producto.cantidad} {producto.unidadMedida}</TableCell>
+                          <TableCell>{producto.monedaCompra || 'Bs'} {formatPrice(producto.costoBolivares)}</TableCell>
+                          <TableCell>{producto.monedaVenta || '$'} {formatPrice(producto.precioVentaDolares)}</TableCell>
+                          <TableCell>{formatDate(producto.fechaCreacion)}</TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 )}
@@ -846,35 +809,21 @@ export function Database() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Nombre</TableHead>
-                        <TableHead>Descripción</TableHead>
-                        <TableHead>P. Venta ($)</TableHead>
-                        <TableHead>Oferta</TableHead>
-                        <TableHead>Costo (Bs)</TableHead>
-                        <TableHead>Usos</TableHead>
+                        <TableHead>Servicio</TableHead>
+                        <TableHead>Categoría</TableHead>
+                        <TableHead>Costo</TableHead>
+                        <TableHead>Precio Venta</TableHead>
                         <TableHead>Fecha</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {servicios.map((servicio) => (
-                        <TableRow key={servicio.id}>
-                          <TableCell className="font-medium text-purple-900">{servicio.nombre}</TableCell>
-                          <TableCell className="max-w-xs truncate text-xs text-gray-500 font-medium italic">{servicio.descripcion}</TableCell>
-                          <TableCell className="font-bold text-gray-900">$ {formatPrice(servicio.precioVenta)}</TableCell>
-                          <TableCell>
-                            {servicio.oferta?.activa ? (
-                              <span className="bg-rose-500 text-white px-2 py-0.5 rounded-full text-[10px] font-black border border-rose-600 shadow-sm animate-pulse">
-                                {servicio.oferta.valor}% OFF
-                              </span>
-                            ) : (
-                              <span className="text-gray-300">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell>Bs {formatPrice(servicio.costo || 0)}</TableCell>
-                          <TableCell className="text-center font-bold">{servicio.cantidadPrestados || 0}</TableCell>
-                          <TableCell className="text-[10px] text-gray-400">
-                            {formatDate(servicio.fechaRegistro || new Date().toISOString())}
-                          </TableCell>
+                      {servicios.map((servicio, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="font-medium">{servicio.nombreServicio}</TableCell>
+                          <TableCell>{servicio.categoria || 'General'}</TableCell>
+                          <TableCell>Bs {formatPrice(servicio.costoBolivares)}</TableCell>
+                          <TableCell>{servicio.monedaVenta || '$'} {formatPrice(servicio.precioVenta)}</TableCell>
+                          <TableCell>{formatDate(servicio.fecha)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -896,45 +845,22 @@ export function Database() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Fecha</TableHead>
-                        <TableHead>Cliente</TableHead>
-                        <TableHead>Cant. Artículos</TableHead>
-                        <TableHead>Moneda</TableHead>
-                        <TableHead>Total Neto</TableHead>
-                        <TableHead>Método de Cobro</TableHead>
-                        <TableHead>Precio Dólar</TableHead>
+                        <TableHead>Ítem</TableHead>
+                        <TableHead>Cant.</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Pago</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {ventas.map((venta) => {
-                        const getMetodoPagoLabel = (metodo: string) => {
-                          const labels: { [key: string]: string } = {
-                            'efectivo_dolares': 'Efectivo',
-                            'efectivo_bolivares': 'Efectivo',
-                            'tarjeta_bolivares': 'Punto Venta',
-                            'pago_movil_bolivares': 'Pago Móvil',
-                          };
-                          return labels[metodo] || metodo;
-                        };
-                        return (
-                          <TableRow key={venta.id}>
-                            <TableCell className="text-sm">
-                              {formatDate(venta.fecha)}
-                            </TableCell>
-                            <TableCell className="font-medium text-gray-700">{venta.cliente?.nombre || 'General'}</TableCell>
-                            <TableCell className="text-center font-bold">{venta.items?.length || 0}</TableCell>
-                            <TableCell>
-                              <span className={`px-2 py-1 rounded text-xs font-bold ${venta.moneda === '$' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                                {venta.moneda === '$' ? 'Dólares ($)' : 'Bolívares (Bs)'}
-                              </span>
-                            </TableCell>
-                            <TableCell className={`font-black ${venta.moneda === '$' ? 'text-green-700' : 'text-blue-700'}`}>
-                              {venta.moneda === '$' ? '$' : 'Bs'} {formatPrice(venta.total)}
-                            </TableCell>
-                            <TableCell className="text-sm text-gray-600">{getMetodoPagoLabel(venta.metodoPago)}</TableCell>
-                            <TableCell className="text-xs text-gray-500 font-medium">Bs {formatPrice(venta.tasaDolar)}</TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {ventas.map((venta, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{formatDate(venta.fecha)}</TableCell>
+                          <TableCell className="font-medium">{venta.producto}</TableCell>
+                          <TableCell>{venta.cantidad}</TableCell>
+                          <TableCell>{venta.moneda === 'Bs' ? 'Bs' : '$'} {formatPrice(venta.total)}</TableCell>
+                          <TableCell>{venta.metodoPago || 'Efectivo'}</TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 )}
@@ -955,23 +881,17 @@ export function Database() {
                       <TableRow>
                         <TableHead>Fecha</TableHead>
                         <TableHead>Descripción</TableHead>
-                        <TableHead>Monto (Bs)</TableHead>
-                        <TableHead>Monto ($)</TableHead>
-                        <TableHead>Usuario</TableHead>
-                        <TableHead>Tasa Bs/$</TableHead>
+                        <TableHead>Monto</TableHead>
+                        <TableHead>Categoría</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {gastos.map((gasto) => (
-                        <TableRow key={gasto.id}>
-                          <TableCell className="text-sm">
-                            {formatDate(gasto.fecha)}
-                          </TableCell>
-                          <TableCell className="max-w-xs">{gasto.descripcion}</TableCell>
-                          <TableCell>Bs {formatPrice(gasto.monto)}</TableCell>
-                          <TableCell>$ {formatPrice(gasto.monto / gasto.tasaDolar)}</TableCell>
-                          <TableCell>{gasto.usuario}</TableCell>
-                          <TableCell>{formatPrice(gasto.tasaDolar)}</TableCell>
+                      {gastos.map((gasto, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{formatDate(gasto.fecha)}</TableCell>
+                          <TableCell className="font-medium">{gasto.descripcion}</TableCell>
+                          <TableCell>{gasto.moneda === 'dolares' ? '$' : 'Bs'} {formatPrice(gasto.monto)}</TableCell>
+                          <TableCell>{gasto.categoria || 'General'}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -992,39 +912,35 @@ export function Database() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Nombre del Combo</TableHead>
-                        <TableHead>Contenido</TableHead>
-                        <TableHead className="text-right">Precio ($)</TableHead>
-                        <TableHead className="text-right">Ahorro ($)</TableHead>
-                        <TableHead className="text-center">Estado</TableHead>
+                        <TableHead>Combo</TableHead>
+                        <TableHead>Items</TableHead>
+                        <TableHead>Valor / Tipo</TableHead>
+                        <TableHead>Estado</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {combos.map((combo, index) => {
-                        const regPrice = combo.items.reduce((acc: number, i: any) => acc + (i.precioBase * i.cantidad), 0);
-                        const ahorro = regPrice - combo.precioCombo;
-                        return (
-                          <TableRow key={index}>
-                            <TableCell className="font-bold text-blue-900">{combo.nombre}</TableCell>
-                            <TableCell>
-                              <div className="flex flex-wrap gap-1">
-                                {combo.items.map((it: any, idx: number) => (
-                                  <span key={idx} className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
-                                    {it.cantidad}x {it.nombre}
-                                  </span>
-                                ))}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right font-black text-green-700">$ {formatPrice(combo.precioCombo)}</TableCell>
-                            <TableCell className="text-right text-rose-600 font-medium">$ {formatPrice(ahorro)}</TableCell>
-                            <TableCell className="text-center">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${combo.activa ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                                {combo.activa ? 'ACTIVO' : 'INACTIVO'}
-                              </span>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {combos.map((combo, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="font-bold text-blue-900">{combo.nombre}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              {combo.items?.map((it: any, idx: number) => (
+                                <span key={idx} className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                                  {it.cantidad}x {it.nombre}
+                                </span>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {combo.tipoOferta === 'precio_fijo' ? `$ ${formatPrice(combo.valor)}` : `${combo.valor}% Off`}
+                          </TableCell>
+                          <TableCell>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${combo.activo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                              {combo.activo ? 'ACTIVO' : 'INACTIVO'}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 )}

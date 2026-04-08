@@ -96,7 +96,7 @@ interface User {
   nombre: string;
   apellido: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   limiteProductos: number;
   limiteServicios: number;
   limiteCombos: number;
@@ -138,7 +138,7 @@ export function Promociones() {
   const loadData = () => {
     const storedUser = localStorage.getItem('currentUser');
     const parsedUser = JSON.parse(storedUser || '{}');
-    const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     const savedProducts = localStorage.getItem('products');
     if (savedProducts) {

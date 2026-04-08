@@ -59,18 +59,14 @@ interface Service {
   id: string;
   nombre: string;
   descripcion: string;
-  costo: number; // Costo en Bs
-  precioVenta: number; // Precio de venta en $
+  costo: number;
+  precioVenta: number;
+  monedaVenta: 'Bs' | '$';
   categoria: string;
-  cantidadPrestados: number; // Cantidad de veces que se ha prestado el servicio
+  cantidad: number;
   fechaRegistro: string;
-  productosUsados: ProductoUsado[]; // Productos del inventario que se usan en este servicio
-  oferta?: {
-    tipo: '2x1' | 'descuento' | 'precio_fijo';
-    valor: number;
-    activa: boolean;
-  };
-  usuarioId: string; // ID del Jefe dueño
+  productosUsados: ProductoUsado[];
+  usuarioId: string;
 }
 
 interface ProductoUsado {
@@ -101,7 +97,7 @@ interface User {
   nombre: string;
   apellido: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   limiteProductos: number;
   limiteServicios: number;
   limiteCombos: number;
@@ -126,9 +122,34 @@ export function Servicios() {
     descripcion: "",
     costo: "",
     precioVenta: "",
+    monedaVenta: '$' as '$' | 'Bs',
     categoria: "",
+    cantidad: "0",
     productosUsados: [] as ProductoUsado[],
   });
+
+  const [isBatchDialogOpen, setIsBatchDialogOpen] = useState(false);
+  const [batchProducedItems, setBatchProducedItems] = useState<Array<{ 
+    id: string; 
+    nombre: string; 
+    cantidad: number; 
+    costo: number;
+    precioVenta: number;
+    monedaVenta: 'Bs' | '$';
+  }>>([]);
+  const [batchInsumos, setBatchInsumos] = useState<Array<{ productoId: string; cantidad: number; nombre: string }>>([]);
+  
+  // States for pricing
+  const [batchPriceMode, setBatchPriceMode] = useState<'unique' | 'individual'>('unique');
+  const [batchGlobalPrice, setBatchGlobalPrice] = useState("");
+  const [batchSpecificPrice, setBatchSpecificPrice] = useState("");
+  const [batchCurrency, setBatchCurrency] = useState<'Bs' | '$'>('$');
+  
+  // States for adding to batch
+  const [selectedBatchService, setSelectedBatchService] = useState("");
+  const [batchServiceQuantity, setBatchServiceQuantity] = useState("1");
+  const [selectedBatchInsumo, setSelectedBatchInsumo] = useState("");
+  const [batchInsumoQuantity, setBatchInsumoQuantity] = useState("");
 
   useEffect(() => {
     const storedUser = localStorage.getItem('currentUser');
@@ -138,7 +159,7 @@ export function Servicios() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar servicios de MySQL
     api.getServicios(ownerId).then(res => {
@@ -148,9 +169,10 @@ export function Servicios() {
           nombre: s.nombreServicio,
           descripcion: s.descripcion || "",
           costo: parseFloat(s.costoBolivares),
-          precioVenta: (parseFloat(s.costoBolivares) * 1.5) / dolarPrice, // Valor por defecto si no hay precio de venta en DB
-          categoria: s.categoria || "Gral",
-          cantidadPrestados: 0,
+          precioVenta: s.precioVenta ? parseFloat(s.precioVenta) : 0,
+          monedaVenta: s.monedaVenta || '$',
+          categoria: s.categoria || "General",
+          cantidad: parseInt(s.cantidad || 0),
           fechaRegistro: s.fecha,
           productosUsados: [],
           usuarioId: String(s.usuarioId)
@@ -162,20 +184,31 @@ export function Servicios() {
     api.getInventario(ownerId).then(res => {
       if (res.success) {
         setProducts(res.productos.map((p: any) => ({
-          ...p, id: String(p.id), cantidad: parseFloat(p.cantidad), precioCompra: parseFloat(p.costoBolivares)
+          ...p, 
+          id: String(p.id), 
+          cantidad: parseFloat(p.cantidad), 
+          precioCompra: parseFloat(p.costoBolivares),
+          monedaCompra: p.monedaCompra || 'Bs'
         })));
       }
     });
   }, [navigate, dolarPrice]);
 
   const refreshServices = () => {
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     api.getServicios(ownerId).then(res => {
       if (res.success) {
         setServices(res.servicios.map((s: any) => ({
-          id: String(s.id), nombre: s.nombreServicio, descripcion: s.descripcion || "",
-          costo: parseFloat(s.costoBolivares), precioVenta: 10, categoria: s.categoria || "Gral",
-          cantidadPrestados: 0, fechaRegistro: s.fecha, productosUsados: [],
+          id: String(s.id), 
+          nombre: s.nombreServicio, 
+          descripcion: s.descripcion || "",
+          costo: parseFloat(s.costoBolivares), 
+          precioVenta: s.precioVenta ? parseFloat(s.precioVenta) : 0, 
+          monedaVenta: s.monedaVenta || '$',
+          categoria: s.categoria || "Gral",
+          cantidad: parseInt(s.cantidad || 0),
+          fechaRegistro: s.fecha, 
+          productosUsados: [],
           usuarioId: String(s.usuarioId)
         })));
       }
@@ -214,37 +247,47 @@ export function Servicios() {
          }, 0)
        : 0;
 
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     
     if (editingService) {
         api.updateServicio(editingService.id, {
             nombreServicio: formData.nombre,
-            descripcion: formData.descripcion,
+            categoria: formData.categoria,
             costoBolivares: costoFinal,
-            categoria: formData.categoria
+            precioVenta: parseFloat(formData.precioVenta) || 0,
+            monedaVenta: formData.monedaVenta,
+            tasaDolar: dolarPrice,
+            cantidad: parseInt(formData.cantidad) || 0,
+            descripcion: formData.descripcion
         })
         .then(() => {
             toast.success('Servicio actualizado exitosamente');
             refreshServices();
+            resetForm();
+            setIsDialogOpen(false);
         })
         .catch(() => toast.error('Error al actualizar servicio'));
     } else {
         api.addServicio({
             usuarioId: ownerId,
             nombreServicio: formData.nombre,
+            categoria: formData.categoria,
             costoBolivares: costoFinal,
+            precioVenta: parseFloat(formData.precioVenta) || 0,
+            monedaVenta: formData.monedaVenta,
+            tasaDolar: dolarPrice,
+            cantidad: parseInt(formData.cantidad) || 0,
             fecha: new Date().toISOString(),
             descripcion: formData.descripcion
         })
         .then(() => {
             toast.success('Servicio agregado exitosamente');
             refreshServices();
+            resetForm();
+            setIsDialogOpen(false);
         })
         .catch(() => toast.error('Error al agregar servicio'));
     }
-
-    resetForm();
-    setIsDialogOpen(false);
   };
 
   const handleEdit = (service: Service) => {
@@ -259,21 +302,21 @@ export function Servicios() {
       descripcion: service.descripcion,
       costo: service.costo.toString(),
       precioVenta: service.precioVenta.toString(),
+      monedaVenta: service.monedaVenta || '$',
       categoria: service.categoria,
+      cantidad: service.cantidad.toString(),
       productosUsados: service.productosUsados || [],
     });
     setIsDialogOpen(true);
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('¿Estás seguro de eliminar este servicio?')) {
-      api.deleteServicio(id)
-        .then(() => {
-          toast.success('Servicio eliminado');
-          refreshServices();
-        })
-        .catch(() => toast.error('Error al eliminar servicio'));
-    }
+    api.deleteServicio(id)
+      .then(() => {
+        toast.success('Servicio eliminado');
+        refreshServices();
+      })
+      .catch(() => toast.error('Error al eliminar servicio'));
   };
 
   const resetForm = () => {
@@ -282,13 +325,121 @@ export function Servicios() {
       descripcion: "",
       costo: "",
       precioVenta: "",
+      monedaVenta: '$',
       categoria: "",
-      productosUsados: [] as ProductoUsado[],
+      cantidad: "0",
+      productosUsados: [] as ProductoUsado[]
     });
     setEditingService(null);
     setSelectedProductId("");
     setProductQuantity("");
     setUsaInventario(false);
+  };
+
+  const handleAddServiceToBatch = () => {
+    // Buscar si es un servicio existente por nombre
+    const existingService = services.find(s => s.nombre.toLowerCase() === selectedBatchService.toLowerCase());
+    const serviceName = existingService ? existingService.nombre : selectedBatchService;
+    
+    if (serviceName && batchServiceQuantity) {
+      const qty = parseInt(batchServiceQuantity);
+      // Determinamos el precio basado en el modo
+      let price = 0;
+      if (batchPriceMode === 'unique') {
+        // En "Individual/Mismo Precio" (según UI nueva) se usa el precio global si existiera, 
+        // pero el usuario pidió que "precio unico" sea el específico. 
+        // Vamos a seguir su lógica de etiquetas exactamente.
+        price = parseFloat(batchSpecificPrice) || 0;
+      } else {
+        price = parseFloat(batchGlobalPrice) || 0;
+      }
+
+      setBatchProducedItems([...batchProducedItems, { 
+        id: existingService ? existingService.id : `new-${Date.now()}`, 
+        nombre: serviceName, 
+        cantidad: qty, 
+        costo: existingService ? existingService.costo : 0,
+        precioVenta: price,
+        monedaVenta: batchCurrency
+      }]);
+      setSelectedBatchService("");
+      setBatchServiceQuantity("1");
+      setBatchSpecificPrice(""); // Limpiar precio específico
+      toast.success('Servicio añadido al lote');
+    }
+  };
+
+  const handleAddInsumoToBatch = () => {
+    const product = products.find(p => p.id === selectedBatchInsumo);
+    if (product && batchInsumoQuantity) {
+      const qty = parseFloat(batchInsumoQuantity);
+      if (qty > product.cantidad) {
+        toast.error(`Stock insuficiente. Solo hay ${product.cantidad} disponible`);
+        return;
+      }
+      setBatchInsumos([...batchInsumos, { 
+        productoId: product.id, 
+        nombre: product.nombre, 
+        cantidad: qty 
+      }]);
+      setSelectedBatchInsumo("");
+      setBatchInsumoQuantity("");
+      toast.success('Insumo añadido al lote');
+    }
+  };
+
+  const handleSaveBatch = async () => {
+    if (batchProducedItems.length === 0) {
+      toast.error('Debes agregar al menos un servicio producido');
+      return;
+    }
+
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
+    
+    // Agrupar items por nombre para enviar al backend (Evita registros individuales por cada unidad)
+    const groupedProducedItems: any[] = [];
+    batchProducedItems.forEach(item => {
+      const finalPrice = batchPriceMode === 'unique' ? parseFloat(batchGlobalPrice) : item.precioVenta;
+      
+      groupedProducedItems.push({
+        nombreServicio: item.nombre,
+        costoBolivares: item.costo, // Costo unitario
+        precioVenta: finalPrice,
+        monedaVenta: batchCurrency,
+        tasaDolar: dolarPrice,
+        cantidad: item.cantidad, // Enviamos el total producido
+        descripcion: `Producción en lote (${item.cantidad} unidades) el ${new Date().toLocaleDateString()}`,
+        fecha: new Date().toISOString()
+      });
+    });
+
+    const batchData = {
+      usuarioId: ownerId,
+      batch: true,
+      servicios: groupedProducedItems,
+      insumos: batchInsumos.map(i => ({ productoId: i.productoId, cantidad: i.cantidad }))
+    };
+
+    try {
+      await api.addBatchServicio(batchData);
+      toast.success('Lote de producción guardado correctamente');
+      setIsBatchDialogOpen(false);
+      refreshServices();
+      // Recargar productos para ver stock actualizado
+      api.getInventario(ownerId).then(res => {
+        if (res.success) {
+          setProducts(res.productos.map((p: any) => ({
+            ...p, 
+            id: String(p.id), 
+            cantidad: parseFloat(p.cantidad), 
+            precioCompra: parseFloat(p.costoBolivares),
+            monedaCompra: p.monedaCompra || 'Bs'
+          })));
+        }
+      });
+    } catch (error) {
+      toast.error('Error al guardar el lote de producción');
+    }
   };
 
   const filteredServices = services.filter(service =>
@@ -306,8 +457,9 @@ export function Servicios() {
   };
 
   const totalServices = services.length;
-  const totalPrestados = services.reduce((acc, s) => acc + s.cantidadPrestados, 0);
-  const totalIngresos = services.reduce((acc, s) => acc + (s.cantidadPrestados * s.precioVenta), 0);
+  // Para propósitos de estadísticas, podemos seguir usando la cantidad total producida o restada
+  const totalStock = services.reduce((acc, s) => acc + s.cantidad, 0);
+  const totalIngresosPossibles = services.reduce((acc, s) => acc + (s.cantidad * s.precioVenta), 0);
 
   const materialProducts = products.filter(p => p.tipo === 'servicio');
 
@@ -339,6 +491,21 @@ export function Servicios() {
 
             </div>
             <div className="flex-1 flex justify-end">
+              <Button 
+                onClick={() => {
+                  setBatchProducedItems([]);
+                  setBatchInsumos([]);
+                  setIsBatchDialogOpen(true);
+                }} 
+                variant="outline" 
+                size="sm" 
+                className="text-xs sm:text-sm mr-2 border-purple-600 text-purple-600 hover:bg-purple-50"
+              >
+                <Package className="mr-0 sm:mr-2 h-4 w-4" />
+                <span className="hidden sm:inline">Nueva Producción</span>
+                <span className="sm:hidden">Lote</span>
+              </Button>
+
               <Button onClick={() => {
                 resetForm();
                 setIsDialogOpen(true);
@@ -417,26 +584,26 @@ export function Servicios() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Servicios Prestados</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium">Stock Total</CardTitle>
+              <Package className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{totalPrestados}</div>
+              <div className="text-2xl font-bold">{totalStock}</div>
               <p className="text-xs text-muted-foreground">
-                Total de prestaciones
+                Unidades disponibles
               </p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Ingresos Totales</CardTitle>
+              <CardTitle className="text-sm font-medium">Valor del Stock</CardTitle>
               <Building2 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">$ {formatPrice(totalIngresos)}</div>
+              <div className="text-2xl font-bold">$ {formatPrice(totalIngresosPossibles)}</div>
               <p className="text-xs text-muted-foreground">
-                Bs {formatPrice(totalIngresos * dolarPrice)}
+                Bs {formatPrice(totalIngresosPossibles * dolarPrice)}
               </p>
             </CardContent>
           </Card>
@@ -488,59 +655,60 @@ export function Servicios() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Nombre</TableHead>
-                      <TableHead>Categoría</TableHead>
-                      <TableHead className="text-right">Costo</TableHead>
-                      <TableHead className="text-right">Precio Venta</TableHead>
-                      <TableHead className="text-right">Veces Prestado</TableHead>
-                      <TableHead className="text-right">Ingresos Totales</TableHead>
-                      <TableHead className="text-center">Acciones</TableHead>
+                      <TableHead className="hidden sm:table-cell">Categoría</TableHead>
+                      <TableHead>Stock / Disp.</TableHead>
+                      <TableHead>Precio</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredServices.map((service) => (
-                      <TableRow key={service.id}>
-                        <TableCell className="font-medium">{service.nombre}</TableCell>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{service.categoria}</div>
-                            <div className="text-sm text-gray-500">{service.descripcion}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">Bs {formatPrice(service.costo)}</TableCell>
-                        <TableCell className="text-right">
-                          <div>
-                            <div className="font-medium">$ {formatPrice(service.precioVenta)}</div>
-                            <div className="text-xs text-gray-500">Bs {formatPrice(service.precioVenta * dolarPrice)}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">{service.cantidadPrestados}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          <div>
-                            <div className="font-medium">$ {formatPrice(service.cantidadPrestados * service.precioVenta)}</div>
-                            <div className="text-xs text-gray-500">Bs {formatPrice(service.cantidadPrestados * service.precioVenta * dolarPrice)}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(service)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(service.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
+                     {filteredServices.map((service) => (
+                       <TableRow key={service.id} className="hover:bg-gray-50/50">
+                         <TableCell>
+                           <div className="font-bold text-gray-900">{service.nombre}</div>
+                           <div className="text-[10px] text-gray-400 sm:hidden uppercase font-bold">{service.categoria}</div>
+                         </TableCell>
+                         <TableCell className="hidden sm:table-cell">
+                           <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] uppercase font-bold border border-gray-200">
+                             {service.categoria}
+                           </span>
+                         </TableCell>
+                         <TableCell>
+                           <span className={`font-black text-sm ${service.cantidad > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                             {service.cantidad} unidades
+                           </span>
+                         </TableCell>
+                         <TableCell>
+                           <div className="font-black text-blue-700 text-sm">
+                             {service.monedaVenta === '$' ? '$' : 'Bs'} {formatPrice(service.precioVenta)}
+                           </div>
+                           <div className="text-[10px] text-gray-400 font-bold">
+                             {service.monedaVenta === '$' ? `≈ Bs ${formatPrice(service.precioVenta * dolarPrice)}` : `≈ $ ${formatPrice(service.precioVenta / dolarPrice)}`}
+                           </div>
+                         </TableCell>
+                         <TableCell className="text-right">
+                           <div className="flex items-center justify-end gap-2">
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               onClick={() => handleEdit(service)}
+                               className="h-8 w-8 p-0"
+                             >
+                               <Edit className="h-4 w-4" />
+                             </Button>
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               onClick={() => handleDelete(service.id)}
+                               className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                             >
+                               <Trash2 className="h-4 w-4" />
+                             </Button>
+                           </div>
+                         </TableCell>
+                       </TableRow>
+                     ))}
+                   </TableBody>
                 </Table>
               </div>
             )}
@@ -628,6 +796,19 @@ export function Servicios() {
                     <option key={index} value={cat} />
                   ))}
                 </datalist>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="cantidad">Stock / Cantidad Disponible *</Label>
+                <Input
+                  id="cantidad"
+                  type="number"
+                  placeholder="0"
+                  value={formData.cantidad}
+                  onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+                  required
+                />
+                <p className="text-[10px] text-gray-500 italic">Indica cuántas unidades hay producidas o disponibles de este servicio.</p>
               </div>
 
               <div className="space-y-2">
@@ -888,6 +1069,294 @@ export function Servicios() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Production Batch Dialog */}
+      <Dialog open={isBatchDialogOpen} onOpenChange={setIsBatchDialogOpen}>
+        <DialogContent className="sm:max-w-[75vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-700">
+              <Package className="h-6 w-6" />
+              Nueva Producción por Lote
+            </DialogTitle>
+            <DialogDescription>
+              Registra múltiples servicios producidos y descuenta el total de insumos usados del inventario.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+            {/* Sección de Producción */}
+            <div className="space-y-4 border-r pr-0 md:pr-4 border-gray-200">
+              <h3 className="font-bold text-gray-900 border-b pb-2 flex items-center gap-2">
+                <Users className="h-4 w-4 text-purple-600" />
+                1. ¿Qué se produjo?
+              </h3>
+              
+              <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase font-bold text-gray-500">Moneda de Venta</Label>
+                    <select 
+                      className="w-full h-9 px-2 rounded-md border text-sm bg-white"
+                      value={batchCurrency}
+                      onChange={(e) => setBatchCurrency(e.target.value as 'Bs' | '$')}
+                    >
+                      <option value="$">Dólares ($)</option>
+                      <option value="Bs">Bolívares (Bs)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase font-bold text-gray-500">Modo de Precio</Label>
+                    <select 
+                      className="w-full h-9 px-2 rounded-md border text-sm bg-white"
+                      value={batchPriceMode}
+                      onChange={(e) => setBatchPriceMode(e.target.value as 'unique' | 'individual')}
+                    >
+                      <option value="individual">Mismo precio para todos</option>
+                      <option value="unique">Precio Único (Específico)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {batchPriceMode === 'individual' && (
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase font-bold text-gray-500">Precio de Venta (Para todo el lote)</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
+                        {batchCurrency === 'Bs' ? 'Bs' : '$'}
+                      </span>
+                      <Input 
+                        type="number" 
+                        placeholder="0.00"
+                        value={batchGlobalPrice}
+                        onChange={(e) => setBatchGlobalPrice(e.target.value)}
+                        className="pl-8 h-9"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex gap-2 items-end bg-purple-50 p-3 rounded-lg border border-purple-100">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs font-bold">Nombre del Servicio</Label>
+                  <div className="flex flex-wrap gap-1 mb-1 max-h-20 overflow-y-auto thin-scrollbar">
+                    {services.length > 0 && services.slice(0, 8).map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setSelectedBatchService(s.nombre)}
+                        className={`text-[9px] px-2 py-0.5 rounded-full border transition-all ${
+                          selectedBatchService === s.nombre 
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-sm' 
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                        }`}
+                      >
+                        {s.nombre} <span className="opacity-60 font-black">({s.cantidad})</span>
+                      </button>
+                    ))}
+                    {services.length > 8 && <span className="text-[9px] text-gray-400 self-center">...</span>}
+                  </div>
+                  <Input
+                    placeholder="Escriba o busque..."
+                    list="batch-services-list"
+                    value={selectedBatchService}
+                    onChange={(e) => setSelectedBatchService(e.target.value)}
+                    className="h-9 bg-white"
+                  />
+                  <datalist id="batch-services-list">
+                    {services.map(s => (
+                      <option key={s.id} value={s.nombre}>Stock: {s.cantidad}</option>
+                    ))}
+                  </datalist>
+                </div>
+                <div className="w-16 space-y-1">
+                  <Label className="text-xs font-bold text-center block">Cant.</Label>
+                  <Input 
+                    type="number" 
+                    value={batchServiceQuantity} 
+                    onChange={(e) => setBatchServiceQuantity(e.target.value)} 
+                    className="h-9 text-center bg-white"
+                  />
+                </div>
+                
+                {batchPriceMode === 'unique' && (
+                  <div className="w-24 space-y-1">
+                    <Label className="text-xs font-bold text-center block">Precio</Label>
+                    <div className="relative">
+                      <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 font-bold">
+                        {batchCurrency}
+                      </span>
+                      <Input 
+                        type="number" 
+                        placeholder="0.00"
+                        value={batchSpecificPrice} 
+                        onChange={(e) => setBatchSpecificPrice(e.target.value)} 
+                        className="h-9 text-xs pl-6 bg-white"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <Button onClick={handleAddServiceToBatch} size="sm" className="h-9 bg-purple-600 hover:bg-purple-700">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {batchProducedItems.length > 0 && (
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                  <Label className="text-xs font-bold text-gray-500 uppercase mt-2 block">Items Agregados:</Label>
+                  {batchProducedItems.map((item, idx) => (
+                    <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200 shadow-sm space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-bold text-gray-800 leading-tight">{item.nombre}</p>
+                          <p className="text-[10px] text-gray-500 uppercase font-bold mt-1">
+                            Cantidad: {item.cantidad} • Ctd: {item.costo > 0 ? `Bs ${formatPrice(item.costo)}` : 'N/A'}
+                          </p>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 w-6 p-0 hover:bg-red-50 hover:text-red-500"
+                          onClick={() => setBatchProducedItems(batchProducedItems.filter((_, i) => i !== idx))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      
+                      {batchPriceMode === 'unique' && (
+                        <div className="flex items-center gap-2 pt-1 border-t border-dashed">
+                          <Label className="text-[10px] font-bold text-blue-600 uppercase">Precio Unitario:</Label>
+                          <div className="relative flex-1">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-gray-400">
+                              {batchCurrency === 'Bs' ? 'Bs' : '$'}
+                            </span>
+                            <Input 
+                              type="number" 
+                              value={item.precioVenta}
+                              onChange={(e) => {
+                                const newItems = [...batchProducedItems];
+                                newItems[idx].precioVenta = parseFloat(e.target.value) || 0;
+                                setBatchProducedItems(newItems);
+                              }}
+                              className="h-7 text-xs pl-6"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Sección de Insumos */}
+            <div className="space-y-4">
+              <h3 className="font-bold text-gray-900 border-b pb-2 flex items-center gap-2">
+                <Package className="h-4 w-4 text-blue-600" />
+                2. ¿Qué insumos se usaron (Total)?
+              </h3>
+
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Material / Producto</Label>
+                  <select
+                    className="w-full px-3 py-2 border rounded-md text-sm"
+                    value={selectedBatchInsumo}
+                    onChange={(e) => setSelectedBatchInsumo(e.target.value)}
+                  >
+                    <option value="">Seleccionar...</option>
+                    {products.map(p => (
+                      <option key={p.id} value={p.id}>{p.nombre} ({p.cantidad} en stock)</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-20 space-y-1">
+                  <Label className="text-xs">Cant.</Label>
+                  <Input 
+                    type="number" 
+                    value={batchInsumoQuantity} 
+                    onChange={(e) => setBatchInsumoQuantity(e.target.value)} 
+                    className="h-9"
+                  />
+                </div>
+                <Button onClick={handleAddInsumoToBatch} size="sm" className="h-9 bg-blue-600 hover:bg-blue-700">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {batchInsumos.length > 0 && (
+                <div className="bg-blue-50 rounded-lg p-3 space-y-2 border border-blue-100">
+                  {batchInsumos.map((item, idx) => (
+                    <div key={idx} className="flex justify-between items-center text-sm">
+                      <span className="font-medium">{item.cantidad} de {item.nombre}</span>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 w-6 p-0"
+                        onClick={() => setBatchInsumos(batchInsumos.filter((_, i) => i !== idx))}
+                      >
+                        <Trash2 className="h-3.3 w-3.3 text-red-500" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              <div className="pt-4 border-t">
+                <div className="bg-gray-100 p-4 rounded-lg space-y-2 border-2 border-blue-200">
+                  <div className="flex justify-between items-center text-xs text-gray-500 font-bold uppercase">
+                    <span>Resumen de Costos</span>
+                    <Package className="h-3 w-3" />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-gray-700">Costo Total (Bs):</span>
+                    <span className="font-black text-blue-700 text-lg">
+                      Bs {formatPrice(batchInsumos.reduce((acc, i) => {
+                        const p = products.find(prod => prod.id === i.productoId);
+                        if (!p) return acc;
+                        const cost = p.precioCompra;
+                        const qty = i.cantidad;
+                        // Si es $, convertir a Bs. Si es Bs, usar directo.
+                        const costInBs = p.monedaCompra === 'Bs' ? cost : cost * dolarPrice;
+                        return acc + (costInBs * qty);
+                      }, 0))}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-gray-200 pt-2">
+                    <span className="font-bold text-gray-700">Costo Total ($):</span>
+                    <span className="font-black text-green-700 text-lg">
+                      $ {formatPrice(batchInsumos.reduce((acc, i) => {
+                        const p = products.find(prod => prod.id === i.productoId);
+                        if (!p) return acc;
+                        const cost = p.precioCompra;
+                        const qty = i.cantidad;
+                        // Si es Bs, convertir a $. Si es $, usar directo.
+                        const costInUsd = p.monedaCompra === '$' ? cost : cost / dolarPrice;
+                        return acc + (costInUsd * qty);
+                      }, 0))}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 italic text-center mt-2">
+                    Cálculos basados en la tasa de cambio actual: Bs {formatPrice(dolarPrice)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsBatchDialogOpen(false)}>
+              <X className="mr-2 h-4 w-4" />
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveBatch} className="bg-purple-600 hover:bg-purple-700">
+              <Save className="mr-2 h-4 w-4" />
+              Finalizar Producción de Lote
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -46,7 +46,7 @@ interface User {
   apellido: string;
   correo: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
 }
 
 interface Trabajador {
@@ -57,7 +57,7 @@ interface Trabajador {
   correo: string;
   contraseña: string;
   propietario: string;
-  rol: 'trabajador' | 'jefe';
+  rol: 'trabajador' | 'subjefe';
   activo: boolean;
   fechaCreacion: string;
 }
@@ -141,10 +141,12 @@ export function Trabajadores() {
     const trabajador = trabajadores.find(t => String(t.id) === String(trabajadorId));
     if (!trabajador) return;
     
-    const newRol = trabajador.rol === 'trabajador' ? 'jefe' : 'trabajador';
+    const newRol = trabajador.rol === 'trabajador' ? 'subjefe' : 'trabajador';
+    const parsedUser = JSON.parse(localStorage.getItem('currentUser')!);
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
     try {
       await api.updateTrabajadorRol(trabajadorId, newRol);
-      toast.success(`${trabajador.nombre} ahora es ${newRol === 'jefe' ? 'Subjefe' : 'Trabajador'}`);
+      toast.success(`${trabajador.nombre} ahora es ${newRol === 'subjefe' ? 'Subjefe' : 'Trabajador'}`);
       
       const userData = JSON.parse(localStorage.getItem('currentUser')!);
       loadTrabajadores(String(userData.jefeId || userData.id));
@@ -174,7 +176,7 @@ export function Trabajadores() {
   }
 
   const trabajadoresActivos = trabajadores.filter(t => t.activo).length;
-  const subjefes = trabajadores.filter(t => t.rol === 'jefe').length;
+  const subjefes = trabajadores.filter(t => t.rol === 'subjefe').length;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -465,12 +467,12 @@ export function Trabajadores() {
                           {/* Avatar */}
                           <div
                             className={`${
-                              trabajador.rol === 'jefe'
+                              trabajador.rol === 'subjefe'
                                 ? 'bg-orange-600 border-orange-700'
                                 : 'bg-blue-600 border-blue-700'
                             } p-3 rounded-full border-4`}
                           >
-                            {trabajador.rol === 'jefe' ? (
+                            {trabajador.rol === 'subjefe' ? (
                               <Crown className="h-6 w-6 text-white" />
                             ) : (
                               <User className="h-6 w-6 text-white" />
@@ -484,14 +486,14 @@ export function Trabajadores() {
                                 {trabajador.nombre} {trabajador.apellido}
                               </h4>
                               <Badge
-                                variant={trabajador.rol === 'jefe' ? 'default' : 'secondary'}
+                                variant={trabajador.rol === 'subjefe' ? 'default' : 'secondary'}
                                 className={`${
-                                  trabajador.rol === 'jefe'
+                                  trabajador.rol === 'subjefe'
                                     ? 'bg-orange-600 hover:bg-orange-700 border-2 border-orange-700'
                                     : 'bg-blue-600 hover:bg-blue-700 border-2 border-blue-700'
                                 } font-bold`}
                               >
-                                {trabajador.rol === 'jefe' ? 'SUBJEFE' : 'TRABAJADOR'}
+                                {trabajador.rol === 'subjefe' ? 'SUBJEFE' : 'TRABAJADOR'}
                               </Badge>
                               {!trabajador.activo && (
                                 <Badge
@@ -528,13 +530,13 @@ export function Trabajadores() {
                             onClick={() => toggleRol(String(trabajador.id))}
                             variant="outline"
                             className={`${
-                              trabajador.rol === 'jefe'
+                              trabajador.rol === 'subjefe'
                                 ? 'bg-blue-50 hover:bg-blue-100 border-2 border-blue-600 text-blue-700'
                                 : 'bg-orange-50 hover:bg-orange-100 border-2 border-orange-600 text-orange-700'
                             } font-bold`}
                             disabled={!trabajador.activo}
                           >
-                            {trabajador.rol === 'jefe' ? (
+                            {trabajador.rol === 'subjefe' ? (
                               <>
                                 <User className="mr-2 h-4 w-4" />
                                 Hacer Trabajador

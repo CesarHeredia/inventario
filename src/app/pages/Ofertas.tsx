@@ -76,7 +76,7 @@ interface User {
   nombre: string;
   apellido: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   jefeId?: string;
 }
 
@@ -118,7 +118,7 @@ export function Ofertas() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar productos (Filtrados por dueño o huérfanos)
     const savedProducts = localStorage.getItem('products');

@@ -37,7 +37,7 @@ interface User {
   apellido: string;
   correo: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   fechaExpiracion?: string;
   jefeId?: string;
 }
@@ -78,7 +78,8 @@ export function Dashboard() {
   const [totalVentasBs, setTotalVentasBs] = useState(0);
   const [totalVentasUsd, setTotalVentasUsd] = useState(0);
   const [totalGastos, setTotalGastos] = useState(0);
-  const [totalInventarioValue, setTotalInventarioValue] = useState(0);
+  const [totalInventarioValue, setTotalInventarioValue] = useState(0); // Sale value in USD
+  const [totalInventarioCost, setTotalInventarioCost] = useState(0); // Investment in Bs
   const [totalPromociones, setTotalPromociones] = useState(0);
   const [totalOfertas, setTotalOfertas] = useState(0);
   const { price: dolarPrice } = useDolarPrice(60000);
@@ -121,14 +122,35 @@ export function Dashboard() {
     syncProfile();
     
     setUser(parsedUser);
-    const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar Inventario
     api.getInventario(ownerId).then(res => {
       if (res.success) {
         setTotalProducts(res.productos.length);
-        const inventoryValue = res.productos.reduce((acc: number, p: any) => acc + (parseFloat(p.cantidad) * (parseFloat(p.precioVentaDolares) || 0)), 0);
-        setTotalInventarioValue(inventoryValue);
+        
+        let saleValueUsd = 0;
+        let investmentBs = 0;
+        const currentSafePrice = dolarPrice || 1;
+
+        res.productos.forEach((p: any) => {
+          const qty = parseFloat(p.cantidad) || 0;
+          const cost = parseFloat(p.costoBolivares) || 0;
+          const price = parseFloat(p.precioVentaDolares) || 0;
+          const mCompra = p.monedaCompra || 'Bs';
+          const mVenta = p.monedaVenta || '$';
+
+          // Calculo de Inversión (Costo)
+          if (mCompra === 'Bs') investmentBs += (qty * cost);
+          else investmentBs += (qty * (cost * currentSafePrice));
+
+          // Calculo de Valor de Venta
+          if (mVenta === '$') saleValueUsd += (qty * price);
+          else saleValueUsd += (qty * (price / currentSafePrice));
+        });
+
+        setTotalInventarioValue(saleValueUsd);
+        setTotalInventarioCost(investmentBs);
       }
     });
 
@@ -367,10 +389,17 @@ export function Dashboard() {
               <Package className="h-5 w-5 text-blue-600" />
             </CardHeader>
             <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-blue-600">{totalProducts} productos</div>
-              <div className="mt-2">
-                <p className="text-sm font-bold text-gray-800">Bs {formatPrice(totalInventarioValue * dolarPrice)}</p>
-                <p className="text-xs text-gray-500 font-medium">$ {formatPrice(totalInventarioValue)}</p>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs font-black text-blue-800 uppercase tracking-tighter">Inversión (Costo)</p>
+                  <p className="text-lg font-bold text-blue-700 leading-none">Bs {formatPrice(totalInventarioCost)}</p>
+                  <p className="text-[10px] text-gray-500 font-bold">$ {formatPrice(totalInventarioCost / dolarPrice)}</p>
+                </div>
+                <div className="border-t border-blue-100 pt-2">
+                  <p className="text-xs font-black text-green-800 uppercase tracking-tighter">Valor de Venta</p>
+                  <p className="text-lg font-bold text-green-700 leading-none">$ {formatPrice(totalInventarioValue)}</p>
+                  <p className="text-[10px] text-gray-500 font-bold">Bs {formatPrice(totalInventarioValue * dolarPrice)}</p>
+                </div>
               </div>
             </CardContent>
           </Card>

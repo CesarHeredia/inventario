@@ -22,6 +22,9 @@ if ($method === 'GET') {
             $p['costoBolivares'] = (float)$p['costoBolivares'];
             $p['precioVentaDolares'] = $p['precioVentaDolares'] ? (float)$p['precioVentaDolares'] : null;
             $p['tasaDolar'] = (float)$p['tasaDolar'];
+            // Asegurar que las monedas tengan valores por defecto si son nulas
+            $p['monedaCompra'] = $p['monedaCompra'] ?? 'Bs';
+            $p['monedaVenta'] = $p['monedaVenta'] ?? '$';
         }
         
         header('Content-Type: application/json');
@@ -35,18 +38,22 @@ if ($method === 'GET') {
     
     try {
         $stmt = $pdo->prepare("
-            INSERT INTO inventario (usuarioId, nombre, tipo, unidadMedida, cantidad, costoBolivares, precioVentaDolares, tasaDolar) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO inventario (usuarioId, nombre, descripcion, categoria, tipo, unidadMedida, cantidad, costoBolivares, monedaCompra, precioVentaDolares, monedaVenta, tasaDolar) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         
         $stmt->execute([
             $data['usuarioId'],
             $data['nombre'],
+            $data['descripcion'] ?? null,
+            $data['categoria'] ?? 'General',
             $data['tipo'],
             $data['unidadMedida'],
             $data['cantidad'],
             $data['costoBolivares'],
+            $data['monedaCompra'] ?? 'Bs',
             $data['precioVentaDolares'] ?? null,
+            $data['monedaVenta'] ?? '$',
             $data['tasaDolar']
         ]);
         
@@ -66,8 +73,42 @@ if ($method === 'GET') {
     }
     
     try {
-        $stmt = $pdo->prepare("UPDATE inventario SET cantidad = ? WHERE id = ?");
-        $stmt->execute([$data['cantidad'], $id]);
+        // Soporte para actualización parcial o completa
+        if (isset($data['update_all']) && $data['update_all'] === true) {
+            $stmt = $pdo->prepare("
+                UPDATE inventario SET 
+                nombre = ?, 
+                descripcion = ?, 
+                categoria = ?, 
+                tipo = ?, 
+                unidadMedida = ?, 
+                cantidad = ?, 
+                costoBolivares = ?, 
+                monedaCompra = ?, 
+                precioVentaDolares = ?, 
+                monedaVenta = ?, 
+                tasaDolar = ? 
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                $data['nombre'],
+                $data['descripcion'] ?? null,
+                $data['categoria'] ?? 'General',
+                $data['tipo'],
+                $data['unidadMedida'],
+                $data['cantidad'],
+                $data['costoBolivares'],
+                $data['monedaCompra'] ?? 'Bs',
+                $data['precioVentaDolares'] ?? null,
+                $data['monedaVenta'] ?? '$',
+                $data['tasaDolar'],
+                $id
+            ]);
+        } else {
+            // Mantener retrocompatibilidad con actualización de solo cantidad
+            $stmt = $pdo->prepare("UPDATE inventario SET cantidad = ? WHERE id = ?");
+            $stmt->execute([$data['cantidad'], $id]);
+        }
         
         echo json_encode(["success" => true, "message" => "Producto actualizado correctamente"]);
     } catch (Exception $e) {

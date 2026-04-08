@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -21,7 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Package, Plus, ArrowLeft, Edit, Trash2, DollarSign, Building2, Search, Save, X, User as UserIcon, UserCog, LogOut } from "lucide-react";
+import { Package, Plus, ArrowLeft, Search, Edit, Trash2, Building2, X, LogOut, User as UserIcon, UserCog, Save, DollarSign, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { useDolarPrice } from "../hooks/useDolarPrice";
 import * as api from "../../utils/api";
@@ -53,7 +54,7 @@ interface User {
   nombre: string;
   apellido: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   limiteProductos: number;
   limiteServicios: number;
   limiteCombos: number;
@@ -99,7 +100,7 @@ export function Inventario() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar productos de la base de datos MySQL
     api.getInventario(ownerId)
@@ -112,9 +113,9 @@ export function Inventario() {
             cantidad: parseFloat(p.cantidad),
             unidadMedida: p.unidadMedida,
             precioCompra: parseFloat(p.costoBolivares),
-            monedaCompra: 'Bs',
+            monedaCompra: p.monedaCompra || 'Bs',
             precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : undefined,
-            monedaVenta: '$',
+            monedaVenta: p.monedaVenta || '$',
             categoria: p.categoria || "General",
             tipo: p.tipo,
             fechaRegistro: p.fechaCreacion,
@@ -138,7 +139,7 @@ export function Inventario() {
   }, [navigate]);
 
   const refreshInventory = () => {
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     api.getInventario(ownerId).then(response => {
       if (response.success) {
         const mappedProducts = response.productos.map((p: any) => ({
@@ -148,9 +149,9 @@ export function Inventario() {
           cantidad: parseFloat(p.cantidad),
           unidadMedida: p.unidadMedida,
           precioCompra: parseFloat(p.costoBolivares),
-          monedaCompra: 'Bs',
+          monedaCompra: p.monedaCompra || 'Bs',
           precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : undefined,
-          monedaVenta: '$',
+          monedaVenta: p.monedaVenta || '$',
           categoria: p.categoria || "General",
           tipo: p.tipo,
           fechaRegistro: p.fechaCreacion,
@@ -165,25 +166,34 @@ export function Inventario() {
     e.preventDefault();
 
     if (!isNewProduct && selectedExistingProduct) {
-      // Agregar stock a producto existente
       const existingProduct = products.find(p => p.id === selectedExistingProduct);
       if (existingProduct) {
-        // Validar cantidad agregar (max 7 dígitos)
-        if (formData.cantidadAgregar.replace(/[^0-9]/g, '').length > 7) {
-          toast.error("La cantidad no puede superar los 7 dígitos");
+        let totalToAdd = 0;
+        
+        if (formData.unidadMedida === 'paquete') {
+          const cPaq = parseFloat(cantidadPaquetes || "0");
+          const uPaq = parseFloat(unidadesPorPaquete || "1");
+          totalToAdd = cPaq * uPaq;
+        } else {
+          totalToAdd = parseFloat(formData.cantidadAgregar || "0");
+        }
+
+        // Validar que totalToAdd no sea absurdo o NaN
+        if (isNaN(totalToAdd) || totalToAdd <= 0) {
+          toast.error("Por favor ingresa una cantidad válida");
           return;
         }
 
-        const newCantidad = existingProduct.cantidad + parseFloat(formData.cantidadAgregar || "0");
-        api.updateProducto(existingProduct.id, newCantidad)
+        const newCantidad = existingProduct.cantidad + totalToAdd;
+        api.updateProducto(existingProduct.id, { cantidad: newCantidad })
           .then(() => {
-            toast.success(`Se agregaron ${formData.cantidadAgregar} unidades a ${existingProduct.nombre}`);
+            toast.success(`Stock actualizado exitosamente para ${existingProduct.nombre}`);
             refreshInventory();
+            resetForm();
+            setIsDialogOpen(false);
           })
           .catch(() => toast.error("Error al actualizar stock"));
         
-        resetForm();
-        setIsDialogOpen(false);
         return;
       }
     }
@@ -225,9 +235,22 @@ export function Inventario() {
       finalUnidadMedida = "unidad"; // Se fuerza a unidad para que pueda ser consumido por piezas
     }
 
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     if (editingProduct) {
-        api.updateProducto(editingProduct.id, finalCantidad)
+        api.updateProducto(editingProduct.id, {
+            update_all: true,
+            nombre: formData.nombre,
+            descripcion: formData.descripcion,
+            categoria: formData.categoria,
+            tipo: formData.tipo,
+            unidadMedida: finalUnidadMedida,
+            cantidad: finalCantidad,
+            costoBolivares: finalPrecioCompra,
+            monedaCompra: formData.monedaCompra,
+            precioVentaDolares: formData.tipo === 'venta' && formData.precioVenta ? parseFloat(formData.precioVenta) : undefined,
+            monedaVenta: formData.monedaVenta,
+            tasaDolar: dolarPrice
+        })
             .then(() => {
                 toast.success('Producto actualizado exitosamente');
                 refreshInventory();
@@ -237,11 +260,15 @@ export function Inventario() {
         api.addProducto({
             usuarioId: ownerId,
             nombre: formData.nombre,
+            descripcion: formData.descripcion,
+            categoria: formData.categoria,
             tipo: formData.tipo as 'venta' | 'servicio',
             unidadMedida: finalUnidadMedida as 'unit' | 'paquete' | 'kilo',
             cantidad: finalCantidad,
             costoBolivares: finalPrecioCompra,
+            monedaCompra: formData.monedaCompra,
             precioVentaDolares: formData.tipo === 'venta' && formData.precioVenta ? parseFloat(formData.precioVenta) : undefined,
+            monedaVenta: formData.monedaVenta,
             tasaDolar: dolarPrice
         })
         .then(() => {
@@ -324,6 +351,10 @@ export function Inventario() {
         monedaCompra: product.monedaCompra,
         monedaVenta: product.monedaVenta || '$'
       });
+      // Resetear estados de paquete para la nueva selección
+      setUnidadesPorPaquete("");
+      setCantidadPaquetes("");
+      setPrecioPaquete("");
     }
   };
 
@@ -341,7 +372,21 @@ export function Inventario() {
     }).format(price);
   };
 
-  const totalInventoryValue = products.reduce((acc, p) => acc + (p.cantidad * (p.precioVenta || 0)), 0);
+  // Cálculo de totales según moneda y tasa del día
+  const totalInventoryValueUsd = products.reduce((acc, p) => {
+    const qty = p.cantidad;
+    const price = p.precioVenta || 0;
+    if (p.monedaVenta === '$') return acc + (qty * price);
+    return acc + (qty * (price / dolarPrice));
+  }, 0);
+
+  const totalInventoryCostBs = products.reduce((acc, p) => {
+    const qty = p.cantidad;
+    const cost = p.precioCompra;
+    if (p.monedaCompra === 'Bs') return acc + (qty * cost);
+    return acc + (qty * (cost * dolarPrice));
+  }, 0);
+
   const totalProducts = products.length;
   const totalItems = products.reduce((acc, p) => acc + p.cantidad, 0);
 
@@ -428,43 +473,42 @@ export function Inventario() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Productos</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
+          <Card className="border-2 border-blue-500 shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
+              <CardTitle className="text-sm font-bold text-blue-700">Inversión (Costo Total)</CardTitle>
+              <DollarSign className="h-4 w-4 text-blue-500" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalProducts}</div>
-              <p className="text-xs text-muted-foreground">
-                Productos únicos
+            <CardContent className="pt-4">
+              <div className="text-xl font-bold text-blue-900">Bs {formatPrice(totalInventoryCostBs)}</div>
+              <p className="text-xs text-gray-500 font-semibold">
+                Equiv. a: $ {formatPrice(totalInventoryCostBs / dolarPrice)}
               </p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Unidades</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
+          <Card className="border-2 border-green-500 shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
+              <CardTitle className="text-sm font-bold text-green-700">Valor de Venta Total</CardTitle>
+              <TrendingUp className="h-4 w-4 text-green-500" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalItems}</div>
-              <p className="text-xs text-muted-foreground">
-                Unidades en stock
+            <CardContent className="pt-4">
+              <div className="text-xl font-bold text-green-900">$ {formatPrice(totalInventoryValueUsd)}</div>
+              <p className="text-xs text-gray-500 font-semibold">
+                Equiv. a: Bs {formatPrice(totalInventoryValueUsd * dolarPrice)}
               </p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Valor Total</CardTitle>
-              <Building2 className="h-4 w-4 text-muted-foreground" />
+          <Card className="border-2 border-orange-500 shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
+              <CardTitle className="text-sm font-bold text-orange-700">Total Unidades</CardTitle>
+              <Package className="h-4 w-4 text-orange-500" />
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">$ {formatPrice(totalInventoryValue)}</div>
-              <p className="text-xs text-muted-foreground">
-                Valor del inventario
+            <CardContent className="pt-4">
+              <div className="text-2xl font-bold text-orange-900">{totalItems}</div>
+              <p className="text-xs text-gray-500 font-semibold">
+                Productos en stock
               </p>
             </CardContent>
           </Card>
@@ -647,100 +691,185 @@ export function Inventario() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="categoria">Categoría *</Label>
-                  <Input
-                    id="categoria"
-                    list="categorias-inventario"
-                    placeholder="Electrónica, Ropa, etc."
-                    value={formData.categoria}
-                    onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
-                    required
-                    maxLength={20}
-                    disabled={!isNewProduct && !editingProduct}
-                  />
-                  <datalist id="categorias-inventario">
-                    {categoriasUnicas.map((cat, index) => (
-                      <option key={index} value={cat} />
-                    ))}
-                  </datalist>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tipo">Tipo *</Label>
-                  <select
-                    id="tipo"
-                    value={formData.tipo}
-                    onChange={(e) => setFormData({ ...formData, tipo: e.target.value as 'venta' | 'servicio' })}
-                    required
-                    disabled={!isNewProduct && !editingProduct}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="venta">Venta</option>
-                    <option value="servicio">Servicio</option>
-                  </select>
-                </div>
-              </div>
+              {(isNewProduct || editingProduct) && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="categoria">Categoría *</Label>
+                      <Input
+                        id="categoria"
+                        list="categorias-inventario"
+                        placeholder="Electrónica, Ropa, etc."
+                        value={formData.categoria}
+                        onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
+                        required
+                        maxLength={20}
+                      />
+                      <datalist id="categorias-inventario">
+                        {categoriasUnicas.map((cat, index) => (
+                          <option key={index} value={cat} />
+                        ))}
+                      </datalist>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tipo">Tipo *</Label>
+                      <select
+                        id="tipo"
+                        value={formData.tipo}
+                        onChange={(e) => setFormData({ ...formData, tipo: e.target.value as 'venta' | 'servicio' })}
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="venta">Venta</option>
+                        <option value="servicio">Servicio</option>
+                      </select>
+                    </div>
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="nombre">Nombre del Producto *</Label>
-                <Input
-                  id="nombre"
-                  placeholder="Laptop HP"
-                  value={formData.nombre}
-                  onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                  required
-                  maxLength={20}
-                  disabled={!isNewProduct && !editingProduct}
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="nombre">Nombre del Producto *</Label>
+                    <Input
+                      id="nombre"
+                      placeholder="Laptop HP"
+                      value={formData.nombre}
+                      onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                      required
+                      maxLength={20}
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="descripcion">Descripción</Label>
-                <Input
-                  id="descripcion"
-                  placeholder="Descripción detallada del producto"
-                  value={formData.descripcion}
-                  onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                  maxLength={20}
-                  disabled={!isNewProduct && !editingProduct}
-                />
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="descripcion">Descripción</Label>
+                    <Input
+                      id="descripcion"
+                      placeholder="Descripción detallada del producto"
+                      value={formData.descripcion}
+                      onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+                      maxLength={20}
+                    />
+                  </div>
+                </>
+              )}
 
               {/* Campos para agregar stock a producto existente */}
               {!isNewProduct && !editingProduct && selectedExistingProduct && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-                  <h3 className="font-semibold text-blue-900">Agregar Stock</h3>
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-5 space-y-4 shadow-inner">
+                  <div className="flex justify-between items-center border-b border-blue-100 pb-2">
+                    <h3 className="font-black text-blue-900 uppercase text-xs tracking-wider">Actualizar Inventario</h3>
+                    <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-200">
+                      {formData.nombre}
+                    </Badge>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="cantidadAgregar">Cantidad a Agregar *</Label>
-                      <Input
-                        id="cantidadAgregar"
-                        type="number"
-                        min="1"
-                        step="1"
-                        placeholder="5"
-                        value={formData.cantidadAgregar}
-                        onChange={(e) => setFormData({ ...formData, cantidadAgregar: e.target.value })}
-                        onInput={(e) => {
-                          const target = e.target as HTMLInputElement;
-                          if (target.value.replace(/[^0-9]/g, '').length > 7) {
-                            target.value = target.value.slice(0, 7);
-                          }
-                        }}
-                        required
-                      />
+                    <div className="bg-white p-3 rounded border border-blue-100">
+                      <Label className="text-[10px] text-gray-500 uppercase font-bold">Stock Actual</Label>
+                      <div className="text-xl font-black text-blue-900">
+                        {formData.cantidad} <span className="text-xs font-medium text-gray-500 uppercase">{formData.unidadMedida}s</span>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Stock Actual</Label>
-                      <div className="px-3 py-2 bg-white border border-gray-300 rounded-md">
-                        {formData.cantidad} {formData.unidadMedida}{parseInt(formData.cantidad || "0") !== 1 ? 's' : ''}
+                    <div className="bg-white p-3 rounded border border-blue-100">
+                      <Label className="text-[10px] text-gray-500 uppercase font-bold">Costo Actual (Bruto)</Label>
+                      <div className="text-xl font-black text-green-700">
+                        {formData.monedaCompra} {formatPrice(parseFloat(formData.precioCompra || "0"))}
                       </div>
                     </div>
                   </div>
-                  <div className="text-sm text-blue-900 font-medium">
-                    Nuevo Total: {parseInt(formData.cantidad || "0") + parseInt(formData.cantidadAgregar || "0")} {formData.unidadMedida}{(parseInt(formData.cantidad || "0") + parseInt(formData.cantidadAgregar || "0")) !== 1 ? 's' : ''}
-                  </div>
+
+                  {formData.unidadMedida === 'paquete' ? (
+                    <div className="space-y-4">
+                      <div className="bg-white p-4 rounded-lg border border-blue-200 space-y-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs font-black text-blue-800 uppercase">1. Especificar Contenido del Paquete</Label>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              placeholder="Ej: 24"
+                              value={unidadesPorPaquete}
+                              onChange={(e) => setUnidadesPorPaquete(e.target.value)}
+                              className="h-10 border-blue-300 focus:ring-blue-500 font-bold"
+                              required
+                            />
+                            <span className="text-xs font-bold text-gray-500">unidades / paquete</span>
+                          </div>
+                        </div>
+
+                        {unidadesPorPaquete && parseFloat(unidadesPorPaquete) > 0 && (
+                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-dashed border-blue-100">
+                            <div className="text-center">
+                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">Paquetes Actuales</p>
+                              <p className="text-lg font-black text-purple-700">
+                                {(parseFloat(formData.cantidad || "0") / parseFloat(unidadesPorPaquete)).toFixed(2)}
+                              </p>
+                            </div>
+                            <div className="text-center">
+                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">Unidades Actuales</p>
+                              <p className="text-lg font-black text-blue-700">{formData.cantidad}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-white p-4 rounded-lg border border-purple-200">
+                        <Label className="text-xs font-black text-purple-800 uppercase">2. ¿Cuántos Paquetes vas a agregar?</Label>
+                        <Input
+                          type="number"
+                          placeholder="Ej: 5"
+                          value={cantidadPaquetes}
+                          onChange={(e) => setCantidadPaquetes(e.target.value)}
+                          className="h-10 border-purple-300 focus:ring-purple-500 font-bold text-lg"
+                          required
+                        />
+                      </div>
+
+                      <div className="bg-purple-600 p-4 rounded-lg text-white shadow-lg transform hover:scale-[1.01] transition-transform">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] font-black uppercase opacity-80 letter-spacing-widest">Nuevas Unidades a sumar</span>
+                          <span className="text-sm font-bold bg-white/20 px-2 rounded">
+                            + {(parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "0"))} uds
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-end border-t border-white/20 pt-2 mt-1">
+                          <span className="text-xs font-black uppercase tracking-wider">TOTAL FINAL EN UNIDADES</span>
+                          <span className="text-2xl font-black">
+                            {(parseFloat(formData.cantidad || "0") + (parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "0")))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-white p-4 rounded-lg border border-blue-200">
+                        <Label className="text-xs font-black text-blue-800 uppercase tracking-wider mb-2 block">
+                          {formData.unidadMedida === 'kilo' ? 'Kilos a Comprar / Agregar *' : 'Unidades a Comprar / Agregar *'}
+                        </Label>
+                        <div className="flex items-center gap-3">
+                          <Input
+                            type="number"
+                            placeholder="0"
+                            value={formData.cantidadAgregar}
+                            onChange={(e) => setFormData({ ...formData, cantidadAgregar: e.target.value })}
+                            className="h-12 text-2xl border-blue-300 focus:ring-blue-500 font-black text-blue-900"
+                            required
+                          />
+                          <span className="text-sm font-bold text-gray-400 uppercase">{formData.unidadMedida === 'kilo' ? 'kg' : 'uds'}</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-600 p-4 rounded-lg text-white shadow-lg">
+                        <div className="flex justify-between items-end">
+                          <div>
+                            <p className="text-[10px] font-black uppercase opacity-70 mb-1">Stock Final Estimado</p>
+                            <p className="text-2xl font-black">
+                              {(parseFloat(formData.cantidad || "0") + parseFloat(formData.cantidadAgregar || "0"))}
+                              <span className="text-sm font-medium ml-2 opacity-80 uppercase">{formData.unidadMedida === 'kilo' ? 'kg' : 'uds'}</span>
+                            </p>
+                          </div>
+                          <TrendingUp className="h-8 w-8 opacity-20" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -856,11 +985,13 @@ export function Inventario() {
                           }
                         }}
                         required
+                        disabled={!isNewProduct && !editingProduct}
                         className="flex-1"
                       />
                       <Select 
                         value={formData.monedaCompra} 
                         onValueChange={(value: '$' | 'Bs') => setFormData({ ...formData, monedaCompra: value })}
+                        disabled={!isNewProduct && !editingProduct}
                       >
                         <SelectTrigger className="w-[90px]">
                           <SelectValue />
@@ -890,11 +1021,13 @@ export function Inventario() {
                           }
                         }}
                         required
+                        disabled={!isNewProduct && !editingProduct}
                         className="flex-1"
                       />
                       <Select 
                         value={formData.monedaVenta} 
                         onValueChange={(value: '$' | 'Bs') => setFormData({ ...formData, monedaVenta: value })}
+                        disabled={!isNewProduct && !editingProduct}
                       >
                         <SelectTrigger className="w-[90px]">
                           <SelectValue />
@@ -923,11 +1056,13 @@ export function Inventario() {
                           else setFormData({ ...formData, precioCompra: e.target.value });
                       }}
                       required
+                      disabled={!isNewProduct && !editingProduct}
                       className="flex-1"
                     />
                     <Select 
                       value={formData.monedaCompra} 
                       onValueChange={(value: '$' | 'Bs') => setFormData({ ...formData, monedaCompra: value })}
+                      disabled={!isNewProduct && !editingProduct}
                     >
                       <SelectTrigger className="w-[90px]">
                         <SelectValue />

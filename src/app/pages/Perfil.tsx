@@ -37,7 +37,7 @@ interface User {
   nombreEmpresa: string;
   fechaNacimiento: string;
   contraseña: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   limiteProductos: number;
   limiteServicios: number;
   limiteCombos: number;

@@ -87,7 +87,7 @@ interface Service {
   costo: number;
   precioVenta: number;
   categoria: string;
-  cantidadPrestados: number;
+  cantidad: number;
   fechaRegistro: string;
   productosUsados: {
     productoId: string;
@@ -150,7 +150,7 @@ interface User {
   nombre: string;
   apellido: string;
   nombreEmpresa: string;
-  rol: 'admin' | 'jefe' | 'trabajador';
+  rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   jefeId?: string;
 }
 
@@ -197,7 +197,7 @@ export function Ventas() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
+    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar productos de MySQL
     api.getInventario(ownerId).then(res => {
@@ -215,13 +215,22 @@ export function Ventas() {
     // Cargar servicios de MySQL
     api.getServicios(ownerId).then(res => {
       if (res.success) {
-        setServices(res.servicios.map((s: any) => ({
-          ...s,
-          id: String(s.id),
-          nombre: s.nombreServicio,
-          precioVenta: parseFloat(s.costoBolivares) / dolarPrice, // Convertir a dólares si es necesario
-          usuarioId: String(s.usuarioId)
-        })));
+        setServices(res.servicios.map((s: any) => {
+          let price = parseFloat(s.precioVenta) || 0;
+          
+          // Si el precio está en Bs, lo convertimos a $ para el estado interno de Ventas.tsx
+          if (s.monedaVenta === 'Bs' && dolarPrice > 0) {
+            price = price / dolarPrice;
+          }
+          
+          return {
+            ...s,
+            id: String(s.id),
+            nombre: s.nombreServicio,
+            precioVenta: price,
+            usuarioId: String(s.usuarioId)
+          };
+        }));
       }
     });
 
@@ -246,11 +255,26 @@ export function Ventas() {
   }, [navigate, dolarPrice]);
 
   const refreshData = () => {
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     api.getInventario(ownerId).then(res => {
         if (res.success) {
             setProducts(res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
                 ...p, id: String(p.id), cantidad: parseFloat(p.cantidad), precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0
+            })));
+        }
+    });
+    api.getServicios(ownerId).then(res => {
+        if (res.success) {
+            setServices(res.servicios.map((s: any) => ({
+                id: String(s.id),
+                nombre: s.nombreServicio,
+                descripcion: s.descripcion || "",
+                costo: parseFloat(s.costoBolivares),
+                precioVenta: s.precioVenta ? parseFloat(s.precioVenta) : 0,
+                categoria: s.categoria || "Gral",
+                cantidad: parseInt(s.cantidad || 0),
+                fechaRegistro: s.fecha,
+                productosUsados: []
             })));
         }
     });
@@ -368,10 +392,17 @@ export function Ventas() {
 
     const item = cart.find(i => i.id === itemId);
     if (item && item.tipo === 'producto') {
-      // Verificar stock
+      // Verificar stock Producto
       const product = products.find(p => p.id === item.originalId);
       if (product && newQuantity > product.cantidad) {
-        toast.error('No hay suficiente stock disponible');
+        toast.error('No hay suficiente stock de producto disponible');
+        return;
+      }
+    } else if (item && item.tipo === 'servicio') {
+      // Verificar stock Servicio
+      const service = services.find(s => s.id === item.originalId);
+      if (service && newQuantity > service.cantidad) {
+        toast.error('No hay suficiente stock de servicio disponible');
         return;
       }
     }
@@ -435,7 +466,7 @@ export function Ventas() {
     }
 
     const appliesIVA = checkoutForm.metodoPago === 'tarjeta_bolivares';
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     
     // Registrar cada producto vendido individualmente en la tabla de ventas
     const salePromises = cart.map(item => {
@@ -464,7 +495,13 @@ export function Ventas() {
           const product = products.find(p => p.id === item.originalId);
           if (product) {
             const newCantidad = product.cantidad - item.cantidad;
-            updatePromises.push(api.updateProducto(product.id, newCantidad));
+            updatePromises.push(api.updateProducto(product.id, { cantidad: newCantidad }));
+          }
+        } else if (item.tipo === 'servicio') {
+          const service = services.find(s => s.id === item.originalId);
+          if (service) {
+            const newCantidad = service.cantidad - item.cantidad;
+            updatePromises.push(api.updateServicio(service.id, { ...service, cantidad: newCantidad }));
           }
         }
       });
@@ -841,10 +878,19 @@ export function Ventas() {
                           <div
                             key={service.id}
                             className="border border-gray-200 rounded-lg p-4 hover:border-blue-500 transition-colors cursor-pointer"
-                            onClick={() => addServiceToCart(service)}
+                            onClick={() => {
+                              if (service.cantidad <= 0) {
+                                toast.error('No hay stock disponible de este servicio');
+                                return;
+                              }
+                              addServiceToCart(service);
+                            }}
                           >
                             <div className="flex justify-between items-start mb-2">
-                              <h3 className="font-semibold text-gray-900">{service.nombre}</h3>
+                              <div>
+                                <h3 className="font-semibold text-gray-900">{service.nombre}</h3>
+                                <div className="text-[10px] uppercase font-bold text-blue-600">Disp: {service.cantidad} unid.</div>
+                              </div>
                               {service.oferta?.activa && service.oferta.tipo === 'descuento' && (
                                 <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full font-bold">
                                   {service.oferta.valor}% OFF
@@ -857,7 +903,19 @@ export function Ventas() {
                                 <p className="text-lg font-bold text-green-600">$ {formatPrice(service.precioVenta)}</p>
                                 <p className="text-xs text-gray-500">Bs {formatPrice(service.precioVenta * dolarPrice)}</p>
                               </div>
-                              <Button size="sm" onClick={() => addServiceToCart(service)}>
+                              <Button 
+                                size="sm" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (service.cantidad <= 0) {
+                                    toast.error('No hay stock disponible de este servicio');
+                                    return;
+                                  }
+                                  addServiceToCart(service);
+                                }}
+                                disabled={service.cantidad <= 0}
+                                className={service.cantidad <= 0 ? 'opacity-50 grayscale' : ''}
+                              >
                                 <Plus className="h-4 w-4" />
                               </Button>
                             </div>

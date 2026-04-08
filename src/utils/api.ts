@@ -108,11 +108,15 @@ export async function getInventario(userId: string) {
 export async function addProducto(productoData: {
   usuarioId: string;
   nombre: string;
+  descripcion?: string;
+  categoria?: string;
   tipo: 'venta' | 'servicio';
   unidadMedida: 'unit' | 'paquete' | 'kilo';
   cantidad: number;
   costoBolivares: number;
+  monedaCompra?: 'Bs' | '$';
   precioVentaDolares?: number;
+  monedaVenta?: 'Bs' | '$';
   tasaDolar: number;
 }) {
   return fetchAPI('/inventario.php', {
@@ -121,10 +125,10 @@ export async function addProducto(productoData: {
   });
 }
 
-export async function updateProducto(id: string, cantidad: number) {
+export async function updateProducto(id: string, productoData: any) {
   return fetchAPI(`/inventario.php?id=${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ cantidad }),
+    body: JSON.stringify(productoData),
   });
 }
 
@@ -166,14 +170,43 @@ export async function getServicios(userId: string) {
 export async function addServicio(servicioData: {
   usuarioId: string;
   nombreServicio: string;
+  categoria?: string;
   cliente?: string;
   costoBolivares: number;
+  precioVenta?: number;
+  monedaVenta?: 'Bs' | '$';
+  tasaDolar?: number;
+  cantidad?: number;
   fecha: string;
   descripcion?: string;
 }) {
   return fetchAPI('/servicios.php', {
     method: 'POST',
     body: JSON.stringify(servicioData),
+  });
+}
+
+export async function addBatchServicio(batchData: {
+  usuarioId: string;
+  batch: boolean;
+  servicios: Array<{
+    nombreServicio: string;
+    costoBolivares: number;
+    precioVenta: number;
+    monedaVenta: 'Bs' | '$';
+    tasaDolar: number;
+    cantidad?: number;
+    descripcion?: string;
+    fecha?: string;
+  }>;
+  insumos: Array<{
+    productoId: string;
+    cantidad: number;
+  }>;
+}) {
+  return fetchAPI('/servicios.php', {
+    method: 'POST',
+    body: JSON.stringify(batchData),
   });
 }
 
