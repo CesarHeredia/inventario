@@ -98,6 +98,7 @@ interface User {
   apellido: string;
   nombreEmpresa: string;
   rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
+  tipoUsuario?: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   limiteProductos: number;
   limiteServicios: number;
   limiteCombos: number;
@@ -159,7 +160,8 @@ export function Servicios() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
+    const userRole = parsedUser.rol || parsedUser.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar servicios de MySQL
     api.getServicios(ownerId).then(res => {
@@ -195,7 +197,8 @@ export function Servicios() {
   }, [navigate, dolarPrice]);
 
   const refreshServices = () => {
-    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
+    const userRole = user?.rol || user?.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? user?.jefeId : user?.id || '');
     api.getServicios(ownerId).then(res => {
       if (res.success) {
         setServices(res.servicios.map((s: any) => ({

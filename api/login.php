@@ -16,7 +16,7 @@ if (empty($data['usuario']) || empty($data['contraseña'])) {
 }
 
 try {
-    $stmt = $pdo->prepare("SELECT * FROM usuarios WHERE usuario = ?");
+    $stmt = $pdo->prepare("SELECT *, tipoUsuario as rol FROM usuarios WHERE usuario = ?");
     $stmt->execute([$data['usuario']]);
     $user = $stmt->fetch();
 

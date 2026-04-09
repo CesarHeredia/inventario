@@ -55,6 +55,7 @@ interface User {
   apellido: string;
   nombreEmpresa: string;
   rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
+  tipoUsuario?: 'jefe' | 'subjefe' | 'trabajador';
   limiteProductos: number;
   limiteServicios: number;
   limiteCombos: number;
@@ -100,7 +101,8 @@ export function Inventario() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
+    const userRole = parsedUser.rol || parsedUser.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar productos de la base de datos MySQL
     api.getInventario(ownerId)
@@ -235,7 +237,8 @@ export function Inventario() {
       finalUnidadMedida = "unidad"; // Se fuerza a unidad para que pueda ser consumido por piezas
     }
 
-    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
+    const userRole = user?.rol || user?.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? user?.jefeId : user?.id || '');
     if (editingProduct) {
         api.updateProducto(editingProduct.id, {
             update_all: true,

@@ -69,6 +69,7 @@ interface User {
   apellido: string;
   nombreEmpresa: string;
   rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
+  tipoUsuario?: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   jefeId?: string;
 }
 
@@ -93,7 +94,8 @@ export function Gastos() {
     }
     const parsedUser = JSON.parse(storedUser);
     setUser(parsedUser);
-    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
+    const userRole = parsedUser.rol || parsedUser.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar gastos de MySQL
     api.getGastos(ownerId).then(res => {

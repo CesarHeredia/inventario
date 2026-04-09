@@ -38,6 +38,7 @@ interface User {
   correo: string;
   nombreEmpresa: string;
   rol: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
+  tipoUsuario?: 'admin' | 'jefe' | 'subjefe' | 'trabajador';
   fechaExpiracion?: string;
   jefeId?: string;
 }
@@ -85,13 +86,13 @@ export function Dashboard() {
   const { price: dolarPrice } = useDolarPrice(60000);
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
-    if (!currentUser) {
+    const storedUser = localStorage.getItem('currentUser');
+    if (!storedUser) {
       navigate('/login');
       return;
     }
     
-    const parsedUser = JSON.parse(currentUser);
+    const parsedUser = JSON.parse(storedUser);
     if (parsedUser.rol === 'admin') {
       navigate('/admin-panel');
       return;
@@ -121,8 +122,8 @@ export function Dashboard() {
     };
     syncProfile();
     
-    setUser(parsedUser);
-    const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
+    const userRole = parsedUser.rol || parsedUser.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
     // Cargar Inventario
     api.getInventario(ownerId).then(res => {
