@@ -26,7 +26,7 @@ export function Login() {
         if (response.success) {
           const user = response.user;
           // Store current user session
-          localStorage.setItem('currentUser', JSON.stringify({
+          sessionStorage.setItem('currentUser', JSON.stringify({
             id: user.id || user.usuario,
             usuario: user.usuario,
             nombre: user.nombre,

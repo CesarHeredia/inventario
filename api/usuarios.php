@@ -1,6 +1,18 @@
 <?php
 require_once 'db.php';
 
+// Verificar autenticación global
+$token = getBearerToken();
+$userPayload = verifyJWT($token);
+if (!$userPayload) {
+    sendError(401, "Sesión inválida o expirada");
+}
+
+// RESTRICCIÓN DE SEGURIDAD: Solo el administrador puede acceder a esta API
+if ($userPayload['rol'] !== 'admin') {
+    sendError(403, "Acceso denegado: Se requieren permisos de administrador");
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
@@ -10,16 +22,13 @@ if ($method === 'GET') {
         header('Content-Type: application/json');
         echo json_encode(["success" => true, "users" => $users]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "message" => "Error al listar usuarios: " . $e->getMessage()]);
+        sendError(500, "Error al listar usuarios", $e->getMessage());
     }
 } elseif ($method === 'PUT') {
     $data = json_decode(file_get_contents("php://input"), true);
     
     if (empty($data['usuario'])) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "Identificador de usuario faltante"]);
-        exit;
+        sendError(400, "Identificador de usuario faltante");
     }
 
     try {
@@ -43,12 +52,9 @@ if ($method === 'GET') {
         header('Content-Type: application/json');
         echo json_encode(["success" => true, "message" => "Usuario actualizado correctamente"]);
     } catch (Exception $e) {
-        http_response_code(500);
-        header('Content-Type: application/json');
-        echo json_encode(["success" => false, "message" => "Error al actualizar: " . $e->getMessage()]);
+        sendError(500, "Error al actualizar", $e->getMessage());
     }
 } else {
-    http_response_code(405);
-    echo json_encode(["success" => false, "message" => "Método no permitido"]);
+    sendError(405, "Método no permitido");
 }
 ?>

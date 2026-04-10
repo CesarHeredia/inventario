@@ -1,14 +1,21 @@
 <?php
 require_once 'db.php';
 
+// Verificar autenticación global
+$token = getBearerToken();
+$userPayload = verifyJWT($token);
+if (!$userPayload) {
+    sendError(401, "Sesión inválida o expirada");
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
     $userId = $_GET['userId'] ?? null;
-    if (!$userId) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "userId es requerido"]);
-        exit();
+    if (!$userId) sendError(400, "userId es requerido");
+    
+    if (!authorizeUser($userPayload, $userId)) {
+        sendError(403, "No tiene permiso para ver estas ventas");
     }
     
     try {
@@ -27,11 +34,14 @@ if ($method === 'GET') {
         header('Content-Type: application/json');
         echo json_encode(["success" => true, "ventas" => $ventas]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "message" => "Error al obtener ventas: " . $e->getMessage()]);
+        sendError(500, "Error al obtener ventas", $e->getMessage());
     }
 } elseif ($method === 'POST') {
     $data = json_decode(file_get_contents("php://input"), true);
+    
+    if (!authorizeUser($userPayload, $data['usuarioId'])) {
+        sendError(403, "No tiene permiso para realizar registros en esta cuenta");
+    }
     
     try {
         $stmt = $pdo->prepare("
@@ -53,11 +63,9 @@ if ($method === 'GET') {
         
         echo json_encode(["success" => true, "message" => "Venta registrada correctamente", "id" => $pdo->lastInsertId()]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "message" => "Error al registrar venta: " . $e->getMessage()]);
+        sendError(500, "Error al registrar venta", $e->getMessage());
     }
 } else {
-    http_response_code(405);
-    echo json_encode(["success" => false, "message" => "Método no permitido"]);
+    sendError(405, "Método no permitido");
 }
 ?>

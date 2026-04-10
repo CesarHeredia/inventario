@@ -8,13 +8,20 @@ const API_BASE_URL = isProduction
 // Helper para hacer peticiones
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
+  const token = sessionStorage.getItem('token');
   
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   const data = await response.json();

@@ -87,7 +87,7 @@ export function Gastos() {
   });
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
       return;
@@ -122,8 +122,8 @@ export function Gastos() {
     e.preventDefault();
 
     // Validaciones de longitud y dígitos
-    if (gastoForm.descripcion.length > 40) {
-      toast.error('La descripción no puede superar los 40 caracteres');
+    if (gastoForm.descripcion.length > 100) {
+      toast.error('La descripción no puede superar los 100 caracteres');
       return;
     }
 
@@ -241,7 +241,7 @@ export function Gastos() {
                   <DropdownMenuItem 
                     className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
                     onClick={() => {
-                      localStorage.removeItem('currentUser');
+                      sessionStorage.removeItem('currentUser');
                       toast.success('Sesión cerrada exitosamente');
                       navigate('/login');
                     }}
@@ -410,7 +410,7 @@ export function Gastos() {
                   value={gastoForm.descripcion}
                   onChange={(e) => setGastoForm({ ...gastoForm, descripcion: e.target.value })}
                   required
-                  maxLength={40}
+                  maxLength={100}
                 />
               </div>
 

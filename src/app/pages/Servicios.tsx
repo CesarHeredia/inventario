@@ -133,6 +133,7 @@ export function Servicios() {
   const [batchProducedItems, setBatchProducedItems] = useState<Array<{ 
     id: string; 
     nombre: string; 
+    categoria: string;
     cantidad: number; 
     costo: number;
     precioVenta: number;
@@ -148,12 +149,13 @@ export function Servicios() {
   
   // States for adding to batch
   const [selectedBatchService, setSelectedBatchService] = useState("");
+  const [batchCategory, setBatchCategory] = useState("");
   const [batchServiceQuantity, setBatchServiceQuantity] = useState("1");
   const [selectedBatchInsumo, setSelectedBatchInsumo] = useState("");
   const [batchInsumoQuantity, setBatchInsumoQuantity] = useState("");
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
       return;
@@ -231,8 +233,8 @@ export function Servicios() {
     }
     
     // Validaciones de longitud
-    if (formData.nombre.length > 20 || formData.categoria.length > 20 || formData.descripcion.length > 20) {
-      toast.error("Nombre, categoría y descripción no pueden superar los 20 caracteres");
+    if (formData.nombre.length > 100 || formData.categoria.length > 100 || formData.descripcion.length > 100) {
+      toast.error("Nombre, categoría y descripción no pueden superar los 100 caracteres");
       return;
     }
 
@@ -343,15 +345,13 @@ export function Servicios() {
     // Buscar si es un servicio existente por nombre
     const existingService = services.find(s => s.nombre.toLowerCase() === selectedBatchService.toLowerCase());
     const serviceName = existingService ? existingService.nombre : selectedBatchService;
+    const serviceCategory = batchCategory || (existingService ? existingService.categoria : 'General');
     
     if (serviceName && batchServiceQuantity) {
       const qty = parseInt(batchServiceQuantity);
       // Determinamos el precio basado en el modo
       let price = 0;
       if (batchPriceMode === 'unique') {
-        // En "Individual/Mismo Precio" (según UI nueva) se usa el precio global si existiera, 
-        // pero el usuario pidió que "precio unico" sea el específico. 
-        // Vamos a seguir su lógica de etiquetas exactamente.
         price = parseFloat(batchSpecificPrice) || 0;
       } else {
         price = parseFloat(batchGlobalPrice) || 0;
@@ -360,12 +360,14 @@ export function Servicios() {
       setBatchProducedItems([...batchProducedItems, { 
         id: existingService ? existingService.id : `new-${Date.now()}`, 
         nombre: serviceName, 
+        categoria: serviceCategory,
         cantidad: qty, 
         costo: existingService ? existingService.costo : 0,
         precioVenta: price,
         monedaVenta: batchCurrency
       }]);
       setSelectedBatchService("");
+      setBatchCategory(""); // Limpiar categoría
       setBatchServiceQuantity("1");
       setBatchSpecificPrice(""); // Limpiar precio específico
       toast.success('Servicio añadido al lote');
@@ -406,6 +408,7 @@ export function Servicios() {
       
       groupedProducedItems.push({
         nombreServicio: item.nombre,
+        categoria: item.categoria,
         costoBolivares: item.costo, // Costo unitario
         precioVenta: finalPrice,
         monedaVenta: batchCurrency,
@@ -553,7 +556,7 @@ export function Servicios() {
                   <DropdownMenuItem 
                     className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
                     onClick={() => {
-                      localStorage.removeItem('currentUser');
+                      sessionStorage.removeItem('currentUser');
                       toast.success('Sesión cerrada exitosamente');
                       navigate('/login');
                     }}
@@ -775,11 +778,11 @@ export function Servicios() {
                 <Label htmlFor="nombre">Nombre del Servicio *</Label>
                 <Input
                   id="nombre"
-                  placeholder="Consultoría, Mantenimiento, etc."
+                  placeholder="Ej: Corte de Cabello, Consulta Médica..."
                   value={formData.nombre}
                   onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                   required
-                  maxLength={20}
+                  maxLength={100}
                 />
               </div>
 
@@ -787,12 +790,12 @@ export function Servicios() {
                 <Label htmlFor="categoria">Categoría *</Label>
                 <Input
                   id="categoria"
+                  placeholder="Ej: Barbería, Estética, General..."
                   list="categorias-servicios"
-                  placeholder="Tecnología, Construcción, etc."
                   value={formData.categoria}
                   onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
                   required
-                  maxLength={20}
+                  maxLength={100}
                 />
                 <datalist id="categorias-servicios">
                   {categoriasUnicas.map((cat, index) => (
@@ -821,7 +824,7 @@ export function Servicios() {
                   placeholder="Descripción detallada del servicio"
                   value={formData.descripcion}
                   onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                  maxLength={20}
+                  maxLength={100}
                 />
               </div>
 
@@ -1149,7 +1152,10 @@ export function Servicios() {
                       <button
                         key={s.id}
                         type="button"
-                        onClick={() => setSelectedBatchService(s.nombre)}
+                        onClick={() => {
+                          setSelectedBatchService(s.nombre);
+                          setBatchCategory(s.categoria);
+                        }}
                         className={`text-[9px] px-2 py-0.5 rounded-full border transition-all ${
                           selectedBatchService === s.nombre 
                             ? 'bg-purple-600 text-white border-purple-600 shadow-sm' 
@@ -1165,12 +1171,32 @@ export function Servicios() {
                     placeholder="Escriba o busque..."
                     list="batch-services-list"
                     value={selectedBatchService}
-                    onChange={(e) => setSelectedBatchService(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedBatchService(val);
+                      const existing = services.find(s => s.nombre.toLowerCase() === val.toLowerCase());
+                      if (existing) setBatchCategory(existing.categoria);
+                    }}
                     className="h-9 bg-white"
                   />
                   <datalist id="batch-services-list">
                     {services.map(s => (
                       <option key={s.id} value={s.nombre}>Stock: {s.cantidad}</option>
+                    ))}
+                  </datalist>
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs font-bold">Categoría</Label>
+                  <Input
+                    placeholder="Categoría..."
+                    list="batch-category-list"
+                    value={batchCategory}
+                    onChange={(e) => setBatchCategory(e.target.value)}
+                    className="h-9 bg-white"
+                  />
+                  <datalist id="batch-category-list">
+                    {categoriasUnicas.map(cat => (
+                      <option key={cat} value={cat} />
                     ))}
                   </datalist>
                 </div>
@@ -1213,9 +1239,34 @@ export function Servicios() {
                   {batchProducedItems.map((item, idx) => (
                     <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200 shadow-sm space-y-2">
                       <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="font-bold text-gray-800 leading-tight">{item.nombre}</p>
-                          <p className="text-[10px] text-gray-500 uppercase font-bold mt-1">
+                        <div className="flex-1 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-[10px] uppercase font-bold text-gray-400">Nombre</Label>
+                              <Input 
+                                value={item.nombre}
+                                onChange={(e) => {
+                                  const newItems = [...batchProducedItems];
+                                  newItems[idx].nombre = e.target.value;
+                                  setBatchProducedItems(newItems);
+                                }}
+                                className="h-7 text-xs font-bold"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[10px] uppercase font-bold text-gray-400">Categoría</Label>
+                              <Input 
+                                value={item.categoria}
+                                onChange={(e) => {
+                                  const newItems = [...batchProducedItems];
+                                  newItems[idx].categoria = e.target.value;
+                                  setBatchProducedItems(newItems);
+                                }}
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                          </div>
+                          <p className="text-[10px] text-gray-500 uppercase font-bold">
                             Cantidad: {item.cantidad} • Ctd: {item.costo > 0 ? `Bs ${formatPrice(item.costo)}` : 'N/A'}
                           </p>
                         </div>

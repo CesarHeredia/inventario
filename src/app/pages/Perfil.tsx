@@ -59,7 +59,7 @@ export function Perfil() {
   });
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
+    const currentUser = sessionStorage.getItem('currentUser');
     if (currentUser) {
       const userData = JSON.parse(currentUser);
       setUser(userData);
@@ -78,7 +78,7 @@ export function Perfil() {
   }, [navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+    sessionStorage.removeItem('currentUser');
     toast.success('Sesión cerrada exitosamente');
     navigate('/login');
   };
@@ -97,7 +97,7 @@ export function Perfil() {
       ...formData,
     } as User;
     
-    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+    sessionStorage.setItem('currentUser', JSON.stringify(updatedUser));
     
     // Actualizar también en la lista de usuarios registrados
     const users = localStorage.getItem('usuarios');

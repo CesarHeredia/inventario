@@ -1,36 +1,52 @@
 <?php
 require_once 'db.php';
 
+// Verificar autenticación global
+$token = getBearerToken();
+$userPayload = verifyJWT($token);
+if (!$userPayload) {
+    sendError(401, "Sesión inválida o expirada");
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
     $usuarioId = $_GET['usuarioId'] ?? null;
-    if (!$usuarioId) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "usuarioId es requerido"]);
-        exit();
+    if (!$usuarioId) sendError(400, "usuarioId es requerido");
+    
+    if (!authorizeUser($userPayload, $usuarioId)) {
+        sendError(403, "No tiene permiso para ver estas promociones");
     }
     
-    $stmt = $pdo->prepare("SELECT * FROM promociones WHERE usuarioId = ?");
-    $stmt->execute([$usuarioId]);
-    $promociones = $stmt->fetchAll();
-    
-    foreach ($promociones as &$p) {
-        $p['activo'] = (bool)$p['activo'];
-        $p['valor'] = (float)$p['valor'];
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM promociones WHERE usuarioId = ?");
+        $stmt->execute([$usuarioId]);
+        $promociones = $stmt->fetchAll();
+        
+        foreach ($promociones as &$p) {
+            $p['activo'] = (bool)$p['activo'];
+            $p['valor'] = (float)$p['valor'];
+        }
+        
+        header('Content-Type: application/json');
+        echo json_encode($promociones);
+    } catch (Exception $e) {
+        sendError(500, "Error al obtener promociones", $e->getMessage());
     }
-    
-    echo json_encode($promociones);
 }
 elseif ($method === 'POST') {
     $data = json_decode(file_get_contents("php://input"), true);
     
-    $stmt = $pdo->prepare("
-        INSERT INTO promociones (usuarioId, nombre, tipoOferta, valor, itemId, tipoItem, activo, fechaInicio, fechaFin) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ");
+    if (!authorizeUser($userPayload, $data['usuarioId'])) {
+        sendError(403, "No tiene permiso para crear promociones en esta cuenta");
+    }
     
     try {
+        $stmt = $pdo->prepare("
+            INSERT INTO promociones (usuarioId, nombre, tipoOferta, valor, itemId, tipoItem, activo, fechaInicio, fechaFin) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        
         $stmt->execute([
             $data['usuarioId'],
             $data['nombre'],
@@ -49,46 +65,44 @@ elseif ($method === 'POST') {
             "id" => $pdo->lastInsertId()
         ]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "message" => "Error al crear promoción: " . $e->getMessage()]);
+        sendError(500, "Error al crear promoción", $e->getMessage());
     }
 }
 elseif ($method === 'PUT') {
     $data = json_decode(file_get_contents("php://input"), true);
     $id = $data['id'] ?? null;
-    
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "id es requerido"]);
-        exit();
-    }
-    
-    $fields = [];
-    $params = [];
-    
-    if (isset($data['nombre'])) { $fields[] = "nombre = ?"; $params[] = $data['nombre']; }
-    if (isset($data['tipoOferta'])) { $fields[] = "tipoOferta = ?"; $params[] = $data['tipoOferta']; }
-    if (isset($data['valor'])) { $fields[] = "valor = ?"; $params[] = $data['valor']; }
-    if (isset($data['activo'])) { $fields[] = "activo = ?"; $params[] = $data['activo'] ? 1 : 0; }
-    if (isset($data['fechaInicio'])) { $fields[] = "fechaInicio = ?"; $params[] = $data['fechaInicio']; }
-    if (isset($data['fechaFin'])) { $fields[] = "fechaFin = ?"; $params[] = $data['fechaFin']; }
-    
-    if (empty($fields)) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "No hay campos para actualizar"]);
-        exit();
-    }
-    
-    $params[] = $id;
-    $sql = "UPDATE promociones SET " . implode(", ", $fields) . " WHERE id = ?";
+    if (!$id) sendError(400, "id es requerido");
     
     try {
+        // Verificar propiedad
+        $stmtCheck = $pdo->prepare("SELECT usuarioId FROM promociones WHERE id = ?");
+        $stmtCheck->execute([$id]);
+        $promo = $stmtCheck->fetch();
+        
+        if (!$promo || !authorizeUser($userPayload, $promo['usuarioId'])) {
+            sendError(403, "No tiene permiso para modificar esta promoción");
+        }
+
+        $fields = [];
+        $params = [];
+        
+        if (isset($data['nombre'])) { $fields[] = "nombre = ?"; $params[] = $data['nombre']; }
+        if (isset($data['tipoOferta'])) { $fields[] = "tipoOferta = ?"; $params[] = $data['tipoOferta']; }
+        if (isset($data['valor'])) { $fields[] = "valor = ?"; $params[] = $data['valor']; }
+        if (isset($data['activo'])) { $fields[] = "activo = ?"; $params[] = $data['activo'] ? 1 : 0; }
+        if (isset($data['fechaInicio'])) { $fields[] = "fechaInicio = ?"; $params[] = $data['fechaInicio']; }
+        if (isset($data['fechaFin'])) { $fields[] = "fechaFin = ?"; $params[] = $data['fechaFin']; }
+        
+        if (empty($fields)) sendError(400, "No hay campos para actualizar");
+        
+        $params[] = $id;
+        $sql = "UPDATE promociones SET " . implode(", ", $fields) . " WHERE id = ?";
+        
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         echo json_encode(["success" => true, "message" => "Promoción actualizada"]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "message" => "Error al actualizar promoción: " . $e->getMessage()]);
+        sendError(500, "Error al actualizar promoción", $e->getMessage());
     }
 }
 elseif ($method === 'DELETE') {
@@ -97,24 +111,26 @@ elseif ($method === 'DELETE') {
         $data = json_decode(file_get_contents("php://input"), true);
         $id = $data['id'] ?? null;
     }
-    
-    if (!$id) {
-        http_response_code(400);
-        echo json_encode(["success" => false, "message" => "id es requerido"]);
-        exit();
-    }
+    if (!$id) sendError(400, "id es requerido");
     
     try {
+        // Verificar propiedad
+        $stmtCheck = $pdo->prepare("SELECT usuarioId FROM promociones WHERE id = ?");
+        $stmtCheck->execute([$id]);
+        $promo = $stmtCheck->fetch();
+        
+        if (!$promo || !authorizeUser($userPayload, $promo['usuarioId'])) {
+            sendError(403, "No tiene permiso para eliminar esta promoción");
+        }
+
         $stmt = $pdo->prepare("DELETE FROM promociones WHERE id = ?");
         $stmt->execute([$id]);
         echo json_encode(["success" => true, "message" => "Promoción eliminada"]);
     } catch (Exception $e) {
-        http_response_code(500);
-        echo json_encode(["success" => false, "message" => "Error al eliminar promoción: " . $e->getMessage()]);
+        sendError(500, "Error al eliminar promoción", $e->getMessage());
     }
 }
 else {
-    http_response_code(405);
-    echo json_encode(["success" => false, "message" => "Método no permitido"]);
+    sendError(405, "Método no permitido");
 }
 ?>

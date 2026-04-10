@@ -94,7 +94,7 @@ export function Inventario() {
   });
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
       return;
@@ -210,8 +210,8 @@ export function Inventario() {
     }
 
     // Validaciones de longitud
-    if (formData.nombre.length > 20 || formData.categoria.length > 20 || formData.descripcion.length > 20) {
-      toast.error("Nombre, categoría y descripción no pueden superar los 20 caracteres");
+    if (formData.nombre.length > 100 || formData.categoria.length > 100 || formData.descripcion.length > 100) {
+      toast.error("Nombre, categoría y descripción no pueden superar los 100 caracteres");
       return;
     }
 
@@ -459,7 +459,7 @@ export function Inventario() {
                   <DropdownMenuItem 
                     className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
                     onClick={() => {
-                      localStorage.removeItem('currentUser');
+                      sessionStorage.removeItem('currentUser');
                       toast.success('Sesión cerrada exitosamente');
                       navigate('/login');
                     }}
@@ -706,7 +706,7 @@ export function Inventario() {
                         value={formData.categoria}
                         onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
                         required
-                        maxLength={20}
+                        maxLength={100}
                       />
                       <datalist id="categorias-inventario">
                         {categoriasUnicas.map((cat, index) => (
@@ -737,7 +737,7 @@ export function Inventario() {
                       value={formData.nombre}
                       onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                       required
-                      maxLength={20}
+                      maxLength={100}
                     />
                   </div>
 
@@ -748,7 +748,7 @@ export function Inventario() {
                       placeholder="Descripción detallada del producto"
                       value={formData.descripcion}
                       onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                      maxLength={20}
+                      maxLength={100}
                     />
                   </div>
                 </>

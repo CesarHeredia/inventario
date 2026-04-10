@@ -76,7 +76,7 @@ export function Trabajadores() {
   });
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
+    const currentUser = sessionStorage.getItem('currentUser');
     if (currentUser) {
       const userData = JSON.parse(currentUser);
       setUser(userData);
@@ -100,7 +100,7 @@ export function Trabajadores() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+    sessionStorage.removeItem('currentUser');
     toast.success('Sesión cerrada exitosamente');
     navigate('/login');
   };
@@ -114,7 +114,7 @@ export function Trabajadores() {
     }
 
     try {
-      const currentUserData = JSON.parse(localStorage.getItem('currentUser')!);
+      const currentUserData = JSON.parse(sessionStorage.getItem('currentUser')!);
       const companyId = String(currentUserData.jefeId || currentUserData.id);
       
       await api.createTrabajador({
@@ -142,7 +142,7 @@ export function Trabajadores() {
     if (!trabajador) return;
     
     const newRol = trabajador.rol === 'trabajador' ? 'subjefe' : 'trabajador';
-    const parsedUser = JSON.parse(localStorage.getItem('currentUser')!);
+    const parsedUser = JSON.parse(sessionStorage.getItem('currentUser')!);
     const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
     try {
       await api.updateTrabajadorRol(trabajadorId, newRol);

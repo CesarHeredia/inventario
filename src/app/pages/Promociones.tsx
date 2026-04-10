@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import * as api from "../../utils/api";
+
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -126,7 +128,7 @@ export function Promociones() {
   const [itemQuantity, setItemQuantity] = useState("1");
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
+    const currentUser = sessionStorage.getItem('currentUser');
     if (currentUser) {
       setUser(JSON.parse(currentUser));
       loadData();
@@ -136,22 +138,40 @@ export function Promociones() {
   }, []);
 
   const loadData = () => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     const parsedUser = JSON.parse(storedUser || '{}');
     const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
-    const savedProducts = localStorage.getItem('products');
-    if (savedProducts) {
-      const allProducts = JSON.parse(savedProducts);
-      setProducts(allProducts.filter((p: any) => String(p.usuarioId) === ownerId));
-    }
-    
-    const savedServices = localStorage.getItem('services');
-    if (savedServices) {
-      const allServices = JSON.parse(savedServices);
-      setServices(allServices.filter((s: any) => String(s.usuarioId) === ownerId));
-    }
-    
+    // Cargar productos de MySQL
+    api.getInventario(ownerId).then(res => {
+      if (res.success) {
+        setProducts(res.productos.filter((p: any) => p.tipo === 'venta').map((p: any) => ({
+          ...p,
+          id: String(p.id),
+          cantidad: parseFloat(p.cantidad),
+          precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0,
+          usuarioId: String(p.usuarioId),
+          tipo: 'venta'
+        })));
+      }
+    });
+
+    // Cargar servicios de MySQL
+    api.getServicios(ownerId).then(res => {
+      if (res.success) {
+        setServices(res.servicios.map((s: any) => ({
+          ...s,
+          id: String(s.id),
+          nombre: s.nombreServicio,
+          precioVenta: parseFloat(s.precioVenta) || 0,
+          categoria: s.categoria || "General",
+          usuarioId: String(s.usuarioId),
+          tipo: 'servicio'
+        })));
+      }
+    });
+
+
     const savedCombos = localStorage.getItem('combos');
     if (savedCombos) {
       const allCombos = JSON.parse(savedCombos);
@@ -162,7 +182,7 @@ export function Promociones() {
   const saveCombos = (updatedCombos: Combo[]) => {
     setCombos(updatedCombos);
     const allCombos = JSON.parse(localStorage.getItem('combos') || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
 
     const filteredOthers = allCombos.filter((c: any) => String(c.usuarioId) !== ownerId);
@@ -215,7 +235,8 @@ export function Promociones() {
       return;
     }
 
-    const ownerId = String(user?.rol === 'trabajador' ? user?.jefeId : user?.id || '');
+    const userRole = user?.rol || user?.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? user?.jefeId : user?.id || '');
     const newCombo: Combo = {
       id: editingCombo?.id || Date.now().toString(),
       nombre: comboName,
@@ -326,7 +347,7 @@ export function Promociones() {
                 <DropdownMenuItem onClick={() => navigate('/perfil')}><UserIcon className="mr-2 h-4 w-4" /> Perfil</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate('/trabajadores')}><UserCog className="mr-2 h-4 w-4" /> Trabajadores</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { localStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600">
+                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -191,7 +191,7 @@ export function Ventas() {
   const [serviceSearch, setServiceSearch] = useState("");
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
       return;
@@ -204,20 +204,30 @@ export function Ventas() {
     // Cargar productos de MySQL
     api.getInventario(ownerId).then(res => {
       if (res.success) {
-        setProducts(res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
+        let dbProducts = res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
           ...p,
           id: String(p.id),
           cantidad: parseFloat(p.cantidad),
           precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0,
           usuarioId: String(p.usuarioId)
-        })));
+        }));
+        
+        const savedProducts = JSON.parse(localStorage.getItem('products') || '[]');
+        dbProducts = dbProducts.map((dbp: any) => {
+            const local = savedProducts.find((lp: any) => String(lp.id) === String(dbp.id));
+            if (local && local.oferta) dbp.oferta = local.oferta;
+            return dbp;
+        });
+        
+        setProducts(dbProducts);
       }
     });
+
 
     // Cargar servicios de MySQL
     api.getServicios(ownerId).then(res => {
       if (res.success) {
-        setServices(res.servicios.map((s: any) => {
+        let dbServices = res.servicios.map((s: any) => {
           let price = parseFloat(s.precioVenta) || 0;
           
           // Si el precio está en Bs, lo convertimos a $ para el estado interno de Ventas.tsx
@@ -232,7 +242,16 @@ export function Ventas() {
             precioVenta: price,
             usuarioId: String(s.usuarioId)
           };
-        }));
+        });
+
+        const savedServices = JSON.parse(localStorage.getItem('services') || '[]');
+        dbServices = dbServices.map((dbs: any) => {
+            const local = savedServices.find((ls: any) => String(ls.id) === String(dbs.id));
+            if (local && local.oferta) dbs.oferta = local.oferta;
+            return dbs;
+        });
+        
+        setServices(dbServices);
       }
     });
 
@@ -667,7 +686,7 @@ export function Ventas() {
                   <DropdownMenuItem 
                     className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
                     onClick={() => {
-                      localStorage.removeItem('currentUser');
+                      sessionStorage.removeItem('currentUser');
                       toast.success('Sesión cerrada exitosamente');
                       navigate('/login');
                     }}

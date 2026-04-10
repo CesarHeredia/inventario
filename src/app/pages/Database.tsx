@@ -73,7 +73,7 @@ export function Database() {
   const [combos, setCombos] = useState<any[]>([]);
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
+    const currentUser = sessionStorage.getItem('currentUser');
     if (currentUser) {
       setUser(JSON.parse(currentUser));
     }
@@ -81,7 +81,7 @@ export function Database() {
   }, []);
 
   const loadAllData = async () => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) return;
     const parsedUser = JSON.parse(storedUser);
     const ownerId = String(parsedUser.rol === 'trabajador' ? parsedUser.jefeId : parsedUser.id || '');
@@ -426,7 +426,7 @@ export function Database() {
                   <DropdownMenuItem 
                     className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
                     onClick={() => {
-                      localStorage.removeItem('currentUser');
+                      sessionStorage.removeItem('currentUser');
                       toast.success('Sesión cerrada exitosamente');
                       navigate('/login');
                     }}

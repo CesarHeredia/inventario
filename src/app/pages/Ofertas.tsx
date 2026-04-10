@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import * as api from "../../utils/api";
+
 import { useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -101,7 +103,7 @@ export function Ofertas() {
   });
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
+    const currentUser = sessionStorage.getItem('currentUser');
     if (currentUser) {
       setUser(JSON.parse(currentUser));
       loadData();
@@ -111,7 +113,7 @@ export function Ofertas() {
   }, []);
 
   const loadData = () => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
       return;
@@ -120,25 +122,58 @@ export function Ofertas() {
     setUser(parsedUser);
     const ownerId = String((parsedUser.rol === 'trabajador' || parsedUser.rol === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
 
-    // Cargar productos (Filtrados por dueño o huérfanos)
-    const savedProducts = localStorage.getItem('products');
-    if (savedProducts) {
-      const allProducts = JSON.parse(savedProducts);
-      setProducts(allProducts.filter((p: any) => String(p.usuarioId) === ownerId));
-    }
-    
-    // Cargar servicios (Filtrados por dueño o huérfanos)
-    const savedServices = localStorage.getItem('services');
-    if (savedServices) {
-      const allServices = JSON.parse(savedServices);
-      setServices(allServices.filter((s: any) => String(s.usuarioId) === ownerId));
-    }
+    // Cargar productos de MySQL y combinar con ofertas locales
+    api.getInventario(ownerId).then(res => {
+      if (res.success) {
+        let dbProducts = res.productos.filter((p: any) => p.tipo === 'venta').map((p: any) => ({
+          ...p,
+          id: String(p.id),
+          cantidad: parseFloat(p.cantidad),
+          precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0,
+          usuarioId: String(p.usuarioId),
+          tipo: 'venta'
+        }));
+        
+        const savedProducts = JSON.parse(localStorage.getItem('products') || '[]');
+        dbProducts = dbProducts.map((dbp: any) => {
+            const local = savedProducts.find((lp: any) => String(lp.id) === String(dbp.id));
+            if (local && local.oferta) dbp.oferta = local.oferta;
+            return dbp;
+        });
+        
+        setProducts(dbProducts);
+      }
+    });
+
+    // Cargar servicios de MySQL y combinar con ofertas locales
+    api.getServicios(ownerId).then(res => {
+      if (res.success) {
+        let dbServicios = res.servicios.map((s: any) => ({
+          ...s,
+          id: String(s.id),
+          nombre: s.nombreServicio,
+          precioVenta: parseFloat(s.precioVenta) || 0,
+          categoria: s.categoria || "General",
+          usuarioId: String(s.usuarioId),
+          tipo: 'servicio'
+        }));
+        
+        const savedServices = JSON.parse(localStorage.getItem('services') || '[]');
+        dbServicios = dbServicios.map((dbs: any) => {
+            const local = savedServices.find((ls: any) => String(ls.id) === String(dbs.id));
+            if (local && local.oferta) dbs.oferta = local.oferta;
+            return dbs;
+        });
+        
+        setServices(dbServicios);
+      }
+    });
   };
 
   const saveItems = (updatedItems: Item[], type: 'venta' | 'servicio') => {
     const key = type === 'venta' ? 'products' : 'services';
     const allItems = JSON.parse(localStorage.getItem(key) || '[]');
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const ownerId = String(currentUser.rol === 'trabajador' ? currentUser.jefeId : currentUser.id || '');
 
     const filteredOthers = allItems.filter((i: any) => String(i.usuarioId) !== ownerId);
@@ -260,7 +295,7 @@ export function Ofertas() {
                 <DropdownMenuItem onClick={() => navigate('/perfil')}><UserIcon className="mr-2 h-4 w-4" /> Perfil</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => navigate('/trabajadores')}><UserCog className="mr-2 h-4 w-4" /> Trabajadores</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { localStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600">
+                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
               </DropdownMenuContent>

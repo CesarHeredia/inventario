@@ -93,7 +93,7 @@ export function AdminPanel() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+    const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     if (currentUser && currentUser.rol === 'admin') {
       setUser(currentUser);
       loadData();
@@ -233,7 +233,7 @@ export function AdminPanel() {
               <DropdownMenuContent align="end" className="w-56 border-2 border-gray-100 shadow-xl rounded-2xl">
                 <DropdownMenuLabel className="font-bold">Administrador</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { localStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 cursor-pointer font-bold">
+                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 cursor-pointer font-bold">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
               </DropdownMenuContent>

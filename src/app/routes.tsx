@@ -18,7 +18,7 @@ import * as React from "react";
 
 // Helper to check if user is authenticated
 const isAuthenticated = () => {
-  return localStorage.getItem('currentUser') !== null;
+  return sessionStorage.getItem('currentUser') !== null;
 };
 
 // Protected Route Component
@@ -27,7 +27,7 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
     return <Navigate to="/login" replace />;
   }
   
-  const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
+  const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
   const role = currentUser.rol || 'jefe';
   
   if (allowedRoles && !allowedRoles.includes(role)) {

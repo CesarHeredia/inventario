@@ -112,7 +112,7 @@ export function Suscripcion() {
   ];
 
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
+    const currentUser = sessionStorage.getItem('currentUser');
     if (currentUser) {
       setUser(JSON.parse(currentUser));
     } else {
@@ -220,7 +220,7 @@ export function Suscripcion() {
                   <UserCog className="mr-2 h-4 w-4 text-purple-500" /> Trabajadores
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { localStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 rounded-xl cursor-pointer py-2.5">
+                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 rounded-xl cursor-pointer py-2.5">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
               </DropdownMenuContent>

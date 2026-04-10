@@ -86,7 +86,7 @@ export function Dashboard() {
   const { price: dolarPrice } = useDolarPrice(60000);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
+    const storedUser = sessionStorage.getItem('currentUser');
     if (!storedUser) {
       navigate('/login');
       return;
@@ -112,7 +112,7 @@ export function Dashboard() {
               limiteServicios: Number(dbUser.limiteServicios),
               limiteCombos: Number(dbUser.limiteCombos)
             };
-            localStorage.setItem('currentUser', JSON.stringify(updated));
+            sessionStorage.setItem('currentUser', JSON.stringify(updated));
             setUser(updated);
           }
         }
@@ -202,7 +202,7 @@ export function Dashboard() {
   }, [navigate, dolarPrice]);
 
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+    sessionStorage.removeItem('currentUser');
     toast.success('Sesión cerrada exitosamente');
     navigate('/login');
   };
