@@ -48,4 +48,3 @@ try {
 } catch (Exception $e) {
     sendError(500, "Error en el servidor", $e->getMessage());
 }
-?>

@@ -25,6 +25,13 @@ export function Login() {
       .then(response => {
         if (response.success) {
           const user = response.user;
+          const token = response.token;
+          
+          // Guardar el token de seguridad
+          if (token) {
+            sessionStorage.setItem('token', token);
+          }
+
           // Store current user session
           sessionStorage.setItem('currentUser', JSON.stringify({
             id: user.id || user.usuario,

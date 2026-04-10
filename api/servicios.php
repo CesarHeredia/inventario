@@ -106,6 +106,22 @@ if ($method === 'GET') {
                 }
             }
 
+            // 3. Registrar en el historial de producciones
+            $stmtHistorial = $pdo->prepare("INSERT INTO producciones (usuarioId, detalles, costoTotal, fecha) VALUES (?, ?, ?, ?)");
+            $detallesJSON = json_encode([
+                "servicios" => $data['servicios'],
+                "insumos" => $data['insumos'] ?? []
+            ]);
+            
+            $costoTotal = $data['costoTotal'] ?? 0;
+
+            $stmtHistorial->execute([
+                $data['usuarioId'],
+                $detallesJSON,
+                $costoTotal,
+                date('Y-m-d H:i:s')
+            ]);
+
             $pdo->commit();
             echo json_encode(["success" => true, "message" => "Lote de producción registrado correctamente"]);
         } else {
@@ -197,7 +213,5 @@ if ($method === 'GET') {
     } catch (Exception $e) {
         sendError(500, "Error al eliminar servicio", $e->getMessage());
     }
-} else {
     sendError(405, "Método no permitido");
 }
-?>

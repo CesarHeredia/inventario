@@ -153,5 +153,20 @@ CREATE TABLE IF NOT EXISTS promociones (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
+-- TABLA: producciones
+-- Registra el historial de producciones por lote
+-- =====================================================
+CREATE TABLE IF NOT EXISTS producciones (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  usuarioId INT NOT NULL,
+  detalles JSON NOT NULL, -- Almacena items producidos e insumos usados
+  costoTotal DECIMAL(15, 2) DEFAULT 0,
+  fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_usuario (usuarioId),
+  INDEX idx_fecha (fecha),
+  FOREIGN KEY (usuarioId) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
 -- FIN DEL SCRIPT
 -- =====================================================

@@ -130,7 +130,7 @@ elseif ($method === 'DELETE') {
         sendError(500, "Error al eliminar promoción", $e->getMessage());
     }
 }
+}
 else {
     sendError(405, "Método no permitido");
 }
-?>

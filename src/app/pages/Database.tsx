@@ -60,7 +60,7 @@ interface User {
 export function Database() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'resumen' | 'usuarios' | 'productos' | 'servicios' | 'ventas' | 'gastos' | 'combos'>('resumen');
+  const [activeTab, setActiveTab] = useState<'resumen' | 'usuarios' | 'productos' | 'servicios' | 'ventas' | 'gastos' | 'combos' | 'produccion'>('resumen');
   const [showPasswords, setShowPasswords] = useState(false);
   const { price: dolarPrice } = useDolarPrice(60000);
   
@@ -71,6 +71,7 @@ export function Database() {
   const [ventas, setVentas] = useState<any[]>([]);
   const [gastos, setGastos] = useState<any[]>([]);
   const [combos, setCombos] = useState<any[]>([]);
+  const [producciones, setProducciones] = useState<any[]>([]);
 
   useEffect(() => {
     const currentUser = sessionStorage.getItem('currentUser');
@@ -127,6 +128,12 @@ export function Database() {
       const p = await api.getPromociones(ownerId);
       if (p.success) setCombos(p.promociones);
     } catch (e) { console.error("Error cargando promociones", e); }
+
+    // 7. Producciones
+    try {
+      const prodRes = await api.getProducciones(ownerId);
+      if (prodRes.success) setProducciones(prodRes.producciones);
+    } catch (e) { console.error("Error cargando producciones", e); }
   };
 
   const exportData = () => {
@@ -196,6 +203,13 @@ export function Database() {
           Usuario: g.usuario
         }));
 
+        const cleanProducciones = producciones.map(p => ({
+          Fecha: formatDate(p.fecha),
+          Servicio: p.servicioNombre,
+          Cantidad: p.cantidadProducida,
+          Insumos: p.insumosConsumidos?.map((i: any) => `${i.nombre} (${i.cantidad})`).join(', ') || ''
+        }));
+
         // Crear hojas
         xlsxLib.utils.book_append_sheet(wb, xlsxLib.utils.json_to_sheet(cleanUsers), "Usuarios");
         xlsxLib.utils.book_append_sheet(wb, xlsxLib.utils.json_to_sheet(cleanProducts), "Inventario");
@@ -203,6 +217,7 @@ export function Database() {
         xlsxLib.utils.book_append_sheet(wb, xlsxLib.utils.json_to_sheet(cleanCombos), "Combos");
         xlsxLib.utils.book_append_sheet(wb, xlsxLib.utils.json_to_sheet(cleanVentas), "Ventas");
         xlsxLib.utils.book_append_sheet(wb, xlsxLib.utils.json_to_sheet(cleanGastos), "Gastos");
+        xlsxLib.utils.book_append_sheet(wb, xlsxLib.utils.json_to_sheet(cleanProducciones), "Producciones");
 
         // Guardar archivo
         xlsxLib.writeFile(wb, `Reporte_Inventoria_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -542,6 +557,20 @@ export function Database() {
               <div className="text-xl font-bold">{combos.length}</div>
             </CardContent>
           </Card>
+          <Card 
+            className={`cursor-pointer transition-all ${activeTab === 'produccion' ? 'ring-2 ring-blue-500' : ''}`}
+            onClick={() => setActiveTab('produccion')}
+          >
+            <CardHeader className="pb-3 p-4">
+              <CardTitle className="text-xs font-bold flex items-center justify-between">
+                <span>Producción</span>
+                <Save className="h-4 w-4" />
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold">{producciones.length}</div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* CONTENIDO PRINCIPAL: RESUMEN ANALÍTICO vs TABLAS CRUD */}
@@ -697,6 +726,7 @@ export function Database() {
                 {activeTab === 'ventas' && 'Ventas Realizadas'}
                 {activeTab === 'gastos' && 'Gastos Registrados'}
                 {activeTab === 'combos' && 'Combos y Promociones'}
+                {activeTab === 'produccion' && 'Historial de Producción'}
               </span>
               {activeTab === 'usuarios' && (
                 <Button 
@@ -900,44 +930,42 @@ export function Database() {
               </div>
             )}
 
-            {/* Combos Table */}
-            {activeTab === 'combos' && (
+            {/* Producciones Table */}
+            {activeTab === 'produccion' && (
               <div className="overflow-x-auto">
-                {combos.length === 0 ? (
+                {producciones.length === 0 ? (
                   <div className="text-center py-8">
-                    <Layers className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <p className="text-gray-500">No hay combos registrados</p>
+                    <Save className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                    <p className="text-gray-500">No hay registros de producción</p>
                   </div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Combo</TableHead>
-                        <TableHead>Items</TableHead>
-                        <TableHead>Valor / Tipo</TableHead>
-                        <TableHead>Estado</TableHead>
+                        <TableHead>Fecha</TableHead>
+                        <TableHead>Servicio Producido</TableHead>
+                        <TableHead>Cant.</TableHead>
+                        <TableHead>Materiales Consumidos</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {combos.map((combo, index) => (
+                      {producciones.map((prod, index) => (
                         <TableRow key={index}>
-                          <TableCell className="font-bold text-blue-900">{combo.nombre}</TableCell>
+                          <TableCell className="text-xs">{formatDate(prod.fecha)}</TableCell>
+                          <TableCell className="font-bold text-blue-900">{prod.servicioNombre}</TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {combo.items?.map((it: any, idx: number) => (
-                                <span key={idx} className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">
+                            <span className="bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded-full text-xs">
+                              +{prod.cantidadProducida}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1 max-w-xs">
+                              {prod.insumosConsumidos?.map((it: any, idx: number) => (
+                                <span key={idx} className="text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100 italic">
                                   {it.cantidad}x {it.nombre}
                                 </span>
                               ))}
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            {combo.tipoOferta === 'precio_fijo' ? `$ ${formatPrice(combo.valor)}` : `${combo.valor}% Off`}
-                          </TableCell>
-                          <TableCell>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${combo.activo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                              {combo.activo ? 'ACTIVO' : 'INACTIVO'}
-                            </span>
                           </TableCell>
                         </TableRow>
                       ))}

@@ -93,6 +93,10 @@ export function Dashboard() {
     }
     
     const parsedUser = JSON.parse(storedUser);
+    
+    // Inicializar estado inmediatamente para evitar pantalla en blanco
+    setUser(parsedUser);
+
     if (parsedUser.rol === 'admin') {
       navigate('/admin-panel');
       return;
@@ -100,21 +104,20 @@ export function Dashboard() {
 
     const syncProfile = async () => {
       try {
-        const res = await api.getAllUsuarios();
-        if (res.success) {
-          const dbUser = res.users.find((u: any) => u.usuario === parsedUser.usuario);
-          if (dbUser) {
-            const updated = { 
-              ...parsedUser, 
-              ...dbUser, 
-              rol: dbUser.tipoUsuario || 'jefe',
-              limiteProductos: Number(dbUser.limiteProductos),
-              limiteServicios: Number(dbUser.limiteServicios),
-              limiteCombos: Number(dbUser.limiteCombos)
-            };
-            sessionStorage.setItem('currentUser', JSON.stringify(updated));
-            setUser(updated);
-          }
+        // Usar getUsuarioById en lugar de getAllUsuarios para evitar 403 (No admin)
+        const res = await api.getUsuarioById(parsedUser.id);
+        if (res.success && res.user) {
+          const dbUser = res.user;
+          const updated = { 
+            ...parsedUser, 
+            ...dbUser, 
+            rol: dbUser.tipoUsuario || 'jefe',
+            limiteProductos: Number(dbUser.limiteProductos),
+            limiteServicios: Number(dbUser.limiteServicios),
+            limiteCombos: Number(dbUser.limiteCombos)
+          };
+          sessionStorage.setItem('currentUser', JSON.stringify(updated));
+          setUser(updated);
         }
       } catch (e) { 
         // Sync failed silently
@@ -246,6 +249,16 @@ export function Dashboard() {
       hoverColor: "hover:from-purple-600 hover:to-violet-700",
       stats: `${totalServices} servicio${totalServices !== 1 ? 's' : ''}`,
       borderColor: "border-purple-500",
+    },
+    {
+      title: "Producción",
+      description: "Gestiona lotes y materiales",
+      icon: Layers,
+      color: "bg-gradient-to-br from-indigo-500 to-indigo-600",
+      hoverColor: "hover:from-indigo-600 hover:to-indigo-700",
+      stats: "Historial de producción",
+      borderColor: "border-indigo-500",
+      path: "/produccion"
     },
     {
       title: "Gastos",

@@ -129,4 +129,3 @@ elseif ($method === 'PUT') {
 } else {
     sendError(405, "Método no permitido");
 }
-?>

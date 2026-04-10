@@ -94,6 +94,7 @@ interface Service {
     productoNombre: string;
     cantidad: number;
   }[];
+  usaInventario?: boolean;
   oferta?: {
     tipo: '2x1' | 'descuento' | 'precio_fijo';
     valor: number;
@@ -186,9 +187,9 @@ export function Ventas() {
 
   const [selectedSaleForRefund, setSelectedSaleForRefund] = useState<Sale | null>(null);
 
-  // Search states
-  const [productSearch, setProductSearch] = useState("");
-  const [serviceSearch, setServiceSearch] = useState("");
+  // Search and Filter states
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<'todos' | 'productos' | 'servicios' | 'produccion' | 'combos'>('todos');
 
   useEffect(() => {
     const storedUser = sessionStorage.getItem('currentUser');
@@ -262,7 +263,17 @@ export function Ventas() {
           ...v,
           id: String(v.id),
           total: parseFloat(v.total),
-          usuarioId: String(v.usuarioId)
+          usuarioId: String(v.usuarioId),
+          // Crear un array virtual de items para compatibilidad con la UI
+          items: [{
+            id: `item-${v.id}`,
+            nombre: v.producto,
+            cantidad: parseFloat(v.cantidad),
+            precioUnitario: parseFloat(v.precioUnitario),
+            subtotal: parseFloat(v.subtotal),
+            tipo: 'servicio', // Genérico para evitar errores
+            originalId: '0'
+          }]
         })));
       }
     });
@@ -279,29 +290,73 @@ export function Ventas() {
     const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
     api.getInventario(ownerId).then(res => {
         if (res.success) {
-            setProducts(res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
-                ...p, id: String(p.id), cantidad: parseFloat(p.cantidad), precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0
-            })));
+            let dbProducts = res.productos.filter((p: any) => p.tipo === 'venta' && parseFloat(p.cantidad) > 0).map((p: any) => ({
+                ...p, 
+                id: String(p.id), 
+                cantidad: parseFloat(p.cantidad), 
+                precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : 0,
+                usuarioId: String(p.usuarioId)
+            }));
+            
+            // Re-aplicar ofertas locales despues del refresh
+            const savedProducts = JSON.parse(localStorage.getItem('products') || '[]');
+            dbProducts = dbProducts.map((dbp: any) => {
+                const local = savedProducts.find((lp: any) => String(lp.id) === String(dbp.id));
+                if (local && local.oferta) dbp.oferta = local.oferta;
+                return dbp;
+            });
+
+            setProducts(dbProducts);
         }
     });
     api.getServicios(ownerId).then(res => {
         if (res.success) {
-            setServices(res.servicios.map((s: any) => ({
-                id: String(s.id),
-                nombre: s.nombreServicio,
-                descripcion: s.descripcion || "",
-                costo: parseFloat(s.costoBolivares),
-                precioVenta: s.precioVenta ? parseFloat(s.precioVenta) : 0,
-                categoria: s.categoria || "Gral",
-                cantidad: parseInt(s.cantidad || 0),
-                fechaRegistro: s.fecha,
-                productosUsados: []
-            })));
+            let dbServices = res.servicios.map((s: any) => {
+                let price = parseFloat(s.precioVenta) || 0;
+                if (s.monedaVenta === 'Bs' && dolarPrice > 0) {
+                    price = price / dolarPrice;
+                }
+                return {
+                    ...s,
+                    id: String(s.id),
+                    nombre: s.nombreServicio,
+                    precioVenta: price,
+                    usuarioId: String(s.usuarioId),
+                    productosUsados: s.productosUsados || []
+                };
+            });
+
+            // Re-aplicar ofertas y recetas locales (los servicios en DB aun no tienen el campo JSON completo)
+            const savedServices = JSON.parse(localStorage.getItem('services') || '[]');
+            dbServices = dbServices.map((dbs: any) => {
+                const local = savedServices.find((ls: any) => String(ls.id) === String(dbs.id));
+                if (local) {
+                    if (local.oferta) dbs.oferta = local.oferta;
+                    if (local.productosUsados) dbs.productosUsados = local.productosUsados;
+                    dbs.usaInventario = local.usaInventario;
+                }
+                return dbs;
+            });
+
+            setServices(dbServices);
         }
     });
     api.getVentas(ownerId).then(res => {
         if (res.success) {
-            setSales(res.ventas.map((v: any) => ({ ...v, id: String(v.id), total: parseFloat(v.total) })));
+            setSales(res.ventas.map((v: any) => ({ 
+                ...v, 
+                id: String(v.id), 
+                total: parseFloat(v.total),
+                items: [{
+                    id: `item-${v.id}`,
+                    nombre: v.producto,
+                    cantidad: parseFloat(v.cantidad),
+                    precioUnitario: parseFloat(v.precioUnitario),
+                    subtotal: parseFloat(v.subtotal),
+                    tipo: 'servicio',
+                    originalId: '0'
+                }]
+            })));
         }
     });
   };
@@ -422,9 +477,22 @@ export function Ventas() {
     } else if (item && item.tipo === 'servicio') {
       // Verificar stock Servicio
       const service = services.find(s => s.id === item.originalId);
-      if (service && newQuantity > service.cantidad) {
-        toast.error('No hay suficiente stock de servicio disponible');
-        return;
+      if (service) {
+        // SI ES RECETA: Verificar si hay materiales suficientes
+        if (service.productosUsados && service.productosUsados.length > 0) {
+           for (const pu of service.productosUsados) {
+             const prod = products.find(p => p.id === pu.productoId);
+             if (prod && (pu.cantidad * newQuantity) > prod.cantidad) {
+               toast.error(`Material insuficiente: ${prod.nombre}`);
+               return;
+             }
+           }
+        } 
+        // SI ES LIMITADO (Stock > 0 o producido): Verificar stock propio
+        else if (service.cantidad > 0 && newQuantity > service.cantidad) {
+          toast.error('No hay suficiente stock de servicio disponible');
+          return;
+        }
       }
     }
 
@@ -521,8 +589,20 @@ export function Ventas() {
         } else if (item.tipo === 'servicio') {
           const service = services.find(s => s.id === item.originalId);
           if (service) {
-            const newCantidad = service.cantidad - item.cantidad;
-            updatePromises.push(api.updateServicio(service.id, { ...service, cantidad: newCantidad }));
+            if (service.productosUsados && service.productosUsados.length > 0) {
+              // DESCONTAR MATERIALES INDIVIDUALES
+              service.productosUsados.forEach(pu => {
+                const product = products.find(p => p.id === pu.productoId);
+                if (product) {
+                  const newQty = product.cantidad - (pu.cantidad * item.cantidad);
+                  updatePromises.push(api.updateProducto(product.id, { cantidad: newQty }));
+                }
+              });
+            } else if (service.cantidad > 0) {
+              // Si tenía stock propio, restarlo
+              const newCantidad = service.cantidad - item.cantidad;
+              updatePromises.push(api.updateServicio(service.id, { ...service, cantidad: newCantidad }));
+            }
           }
         }
       });
@@ -704,304 +784,253 @@ export function Ventas() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Productos y Servicios */}
+          {/* Unified Search and Grid */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Productos */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Productos Disponibles</CardTitle>
-                <CardDescription>
-                  Selecciona productos para agregar a la venta
-                </CardDescription>
-                {/* Buscador de productos */}
-                <div className="relative mt-4">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    type="text"
-                    placeholder="Buscar productos..."
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {products.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <p className="text-gray-500">No hay productos disponibles para venta</p>
+            {/* Unified Search and Filters */}
+            <Card className="border-blue-100 shadow-sm">
+              <CardContent className="pt-6">
+                <div className="flex flex-col gap-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-blue-400" />
+                    <Input
+                      placeholder="Buscar en todo el catálogo (productos, servicios, combos...)"
+                      value={globalSearch}
+                      onChange={(e) => setGlobalSearch(e.target.value)}
+                      className="pl-11 h-12 text-lg border-blue-100 focus:ring-blue-500 rounded-xl"
+                    />
                   </div>
-                ) : (
-                  <>
-                    {products.filter(product => 
-                      product.nombre.toLowerCase().includes(productSearch.toLowerCase()) ||
-                      product.descripcion.toLowerCase().includes(productSearch.toLowerCase()) ||
-                      product.categoria.toLowerCase().includes(productSearch.toLowerCase())
-                    ).length === 0 ? (
-                      <div className="text-center py-8">
-                        <Search className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                        <p className="text-gray-500">No se encontraron productos</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {products
-                          .filter(product => 
-                            product.nombre.toLowerCase().includes(productSearch.toLowerCase()) ||
-                            product.descripcion.toLowerCase().includes(productSearch.toLowerCase()) ||
-                            product.categoria.toLowerCase().includes(productSearch.toLowerCase())
-                          )
-                          .map((product) => (
-                          <div
-                            key={product.id}
-                            className="border border-gray-200 rounded-lg p-4 hover:border-blue-500 transition-colors cursor-pointer"
-                            onClick={() => addProductToCart(product)}
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <h3 className="font-semibold text-gray-900">{product.nombre}</h3>
-                                <p className="text-sm text-gray-500">{product.categoria}</p>
-                                {product.oferta?.activa && product.oferta.tipo === 'descuento' && (
-                                  <span className="ml-2 text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full font-bold">
-                                    {product.oferta.valor}% OFF
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                                {product.cantidad} {product.unidadMedida}{product.cantidad !== 1 ? 's' : ''}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-600 mb-3">{product.descripcion}</p>
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="text-lg font-bold text-green-600">$ {formatPrice(product.precioVenta || 0)}</p>
-                                <p className="text-xs text-gray-500">Bs {formatPrice((product.precioVenta || 0) * dolarPrice)}</p>
-                              </div>
-                              <Button size="sm" onClick={() => addProductToCart(product)}>
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Promociones (Combos) */}
-            <Card className="border-indigo-200 bg-indigo-50/20">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Star className="h-5 w-5 text-indigo-600" />
-                  Promociones y Combos
-                </CardTitle>
-                <CardDescription>
-                  Paquetes especiales con descuento
-                </CardDescription>
-                <div className="relative mt-4">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    type="text"
-                    placeholder="Buscar combos..."
-                    value={comboSearch}
-                    onChange={(e) => setComboSearch(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {combos.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Layers className="mx-auto h-10 w-10 text-gray-300 mb-4" />
-                    <p className="text-gray-400 text-sm">No hay combos promocionales activos</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {combos
-                      .filter(c => c.nombre.toLowerCase().includes(comboSearch.toLowerCase()))
-                      .map((combo) => (
-                      <div
-                        key={combo.id}
-                        className="bg-white border-2 border-indigo-100 rounded-xl p-4 hover:border-indigo-500 transition-all cursor-pointer shadow-sm relative overflow-hidden group"
-                        onClick={() => addComboToCart(combo)}
+                  
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: 'todos', label: 'Todo', icon: <Layers className="h-4 w-4" /> },
+                      { id: 'productos', label: 'Productos', icon: <Package className="h-4 w-4" /> },
+                      { id: 'servicios', label: 'Servicios', icon: <Building2 className="h-4 w-4" /> },
+                      { id: 'produccion', label: 'Producción', icon: <Save className="h-4 w-4" /> },
+                      { id: 'combos', label: 'Combos', icon: <Star className="h-4 w-4" /> }
+                    ].map((cat) => (
+                      <Button
+                        key={cat.id}
+                        type="button"
+                        variant={activeCategory === cat.id ? 'default' : 'outline'}
+                        onClick={() => setActiveCategory(cat.id as any)}
+                        className={`rounded-full px-4 py-1.5 h-auto text-sm flex items-center gap-2 transition-all ${
+                          activeCategory === cat.id 
+                            ? 'bg-blue-600 text-white shadow-md transform scale-105' 
+                            : 'hover:bg-blue-50 border-blue-100 text-blue-600'
+                        }`}
                       >
-                        <div className="absolute top-0 right-0 bg-indigo-600 text-white px-2 py-1 text-[10px] font-bold uppercase rounded-bl-lg">
-                          Combo
-                        </div>
-                        <h3 className="font-bold text-indigo-900 group-hover:text-indigo-600 transition-colors uppercase text-sm mb-2">{combo.nombre}</h3>
-                        <div className="space-y-1 mb-3">
-                          {combo.items.map((it, idx) => (
-                            <p key={idx} className="text-[10px] text-gray-500 flex items-center gap-1">
-                              <CheckCircle className="h-2.5 w-2.5 text-green-500" /> {it.cantidad}x {it.nombre}
-                            </p>
-                          ))}
-                        </div>
-                        <div className="flex justify-between items-center mt-2 border-t pt-2 border-indigo-50">
-                          <div>
-                            <p className="text-lg font-black text-indigo-700">$ {formatPrice(combo.precioCombo)}</p>
-                            <p className="text-[10px] text-gray-400 line-through">Reg. $ {formatPrice(combo.items.reduce((acc, i) => acc + (i.precioBase * i.cantidad), 0))}</p>
-                          </div>
-                          <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 h-8 w-8 p-0">
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
+                        {cat.icon}
+                        {cat.label}
+                      </Button>
                     ))}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Servicios */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Servicios Disponibles</CardTitle>
-                <CardDescription>
-                  Servicios predefinidos
-                </CardDescription>
-                {/* Buscador de servicios */}
-                <div className="relative mt-4">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    type="text"
-                    placeholder="Buscar servicios..."
-                    value={serviceSearch}
-                    onChange={(e) => setServiceSearch(e.target.value)}
-                    className="pl-10"
-                  />
                 </div>
-              </CardHeader>
-              <CardContent>
-                {services.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Building2 className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <p className="text-gray-500">No hay servicios disponibles</p>
-                  </div>
-                ) : (
-                  <>
-                    {services.filter(service => 
-                      service.nombre.toLowerCase().includes(serviceSearch.toLowerCase()) ||
-                      service.descripcion.toLowerCase().includes(serviceSearch.toLowerCase())
-                    ).length === 0 ? (
-                      <div className="text-center py-8">
-                        <Search className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                        <p className="text-gray-500">No se encontraron servicios</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {services
-                          .filter(service => 
-                            service.nombre.toLowerCase().includes(serviceSearch.toLowerCase()) ||
-                            service.descripcion.toLowerCase().includes(serviceSearch.toLowerCase())
-                          )
-                          .map((service) => (
-                          <div
-                            key={service.id}
-                            className="border border-gray-200 rounded-lg p-4 hover:border-blue-500 transition-colors cursor-pointer"
-                            onClick={() => {
-                              if (service.cantidad <= 0) {
-                                toast.error('No hay stock disponible de este servicio');
-                                return;
-                              }
-                              addServiceToCart(service);
-                            }}
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <h3 className="font-semibold text-gray-900">{service.nombre}</h3>
-                                <div className="text-[10px] uppercase font-bold text-blue-600">Disp: {service.cantidad} unid.</div>
-                              </div>
-                              {service.oferta?.activa && service.oferta.tipo === 'descuento' && (
-                                <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full font-bold">
-                                  {service.oferta.valor}% OFF
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-600 mb-3">{service.descripcion}</p>
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="text-lg font-bold text-green-600">$ {formatPrice(service.precioVenta)}</p>
-                                <p className="text-xs text-gray-500">Bs {formatPrice(service.precioVenta * dolarPrice)}</p>
-                              </div>
-                              <Button 
-                                size="sm" 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (service.cantidad <= 0) {
-                                    toast.error('No hay stock disponible de este servicio');
-                                    return;
-                                  }
-                                  addServiceToCart(service);
-                                }}
-                                disabled={service.cantidad <= 0}
-                                className={service.cantidad <= 0 ? 'opacity-50 grayscale' : ''}
-                              >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
               </CardContent>
             </Card>
 
-            {/* Historial de Ventas */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Historial de Ventas</CardTitle>
-                <CardDescription>
-                  Registro de las ventas realizadas
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {sales.length === 0 ? (
-                  <div className="text-center py-8">
-                    <RotateCcw className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                    <p className="text-gray-500">No hay ventas registradas</p>
-                  </div>
-                ) : (
-                  <div className="max-h-96 overflow-y-auto pr-2 space-y-3">
-                    {sales.slice().reverse().map((sale) => (
-                      <div key={sale.id} className="border border-gray-200 rounded-lg p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center hover:border-blue-500 transition-colors gap-2">
-                        <div>
-                          <p className="font-semibold text-sm">
-                            {new Date(sale.fecha).toLocaleDateString('es-VE', {
-                              day: '2-digit', month: '2-digit', year: 'numeric',
-                              hour: '2-digit', minute: '2-digit'
-                            })}
-                          </p>
-                          <div className="text-xs text-gray-500 flex flex-col mt-1">
-                            <span>Usuario: <span className="font-medium text-gray-700">{sale.usuario || 'N/A'}</span></span>
-                            <span>Cliente: <span className="font-medium text-gray-700">{sale.cliente?.nombre || 'General'}</span></span>
-                            <span className="flex items-center gap-1 mt-1">
-                              Método: {getMetodoPagoIcon(sale.metodoPago)} <span className="font-medium text-gray-700">{getMetodoPagoLabel(sale.metodoPago)}</span>
+            <div className="space-y-6 overflow-y-auto max-h-[calc(100vh-280px)] pr-2 thin-scrollbar">
+              {/* Dynamic Content Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* 1. PRODUCTOS */}
+                {(activeCategory === 'todos' || activeCategory === 'productos') && 
+                  products
+                    .filter(p => !globalSearch || p.nombre.toLowerCase().includes(globalSearch.toLowerCase()) || p.categoria.toLowerCase().includes(globalSearch.toLowerCase()))
+                    .map(product => (
+                      <Card 
+                        key={product.id} 
+                        className="group hover:shadow-md transition-all cursor-pointer border-blue-50 hover:border-blue-300"
+                        onClick={() => addProductToCart(product)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Package className="h-3 w-3 text-blue-500" />
+                                <span className="text-[10px] font-black uppercase text-blue-500 tracking-wider">Producto</span>
+                              </div>
+                              <h3 className="font-bold text-gray-900 truncate group-hover:text-blue-600 transition-colors uppercase text-sm">
+                                {product.nombre}
+                              </h3>
+                              <p className="text-[10px] text-gray-500 font-bold uppercase">{product.categoria}</p>
+                            </div>
+                            <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-1 rounded-full whitespace-nowrap">
+                              {product.cantidad} {product.unidadMedida}
                             </span>
                           </div>
+                          
+                          <div className="flex justify-between items-end mt-4">
+                            <div>
+                              <p className="text-lg font-black text-green-600">$ {formatPrice(product.precioVenta || 0)}</p>
+                              <p className="text-[10px] text-gray-400 font-bold uppercase">Ref: Bs {formatPrice((product.precioVenta || 0) * dolarPrice)}</p>
+                            </div>
+                            <Button size="sm" className="h-8 w-8 rounded-full bg-blue-600 hover:bg-blue-700 shadow-sm">
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                }
+
+                {/* 2. COMBOS */}
+                {(activeCategory === 'todos' || activeCategory === 'combos') && 
+                  combos
+                    .filter(c => !globalSearch || c.nombre.toLowerCase().includes(globalSearch.toLowerCase()))
+                    .map(combo => (
+                      <Card 
+                        key={combo.id} 
+                        className="group hover:shadow-md transition-all cursor-pointer border-indigo-100 hover:border-indigo-300 bg-indigo-50/10"
+                        onClick={() => addComboToCart(combo)}
+                      >
+                        <CardContent className="p-4 relative">
+                          <div className="absolute top-2 right-2 flex items-center gap-1 bg-indigo-600 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase shadow-sm">
+                            <Star className="h-2.5 w-2.5 fill-current" /> Combo
+                          </div>
+                          <div className="mb-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Layers className="h-3 w-3 text-indigo-500" />
+                              <span className="text-[10px] font-black uppercase text-indigo-500 tracking-wider">Promoción Especial</span>
+                            </div>
+                            <h3 className="font-bold text-indigo-900 group-hover:text-indigo-600 transition-colors uppercase text-sm">{combo.nombre}</h3>
+                          </div>
+                          
+                          <div className="space-y-1 mb-4 bg-white/50 p-2 rounded-lg border border-indigo-50">
+                            {combo.items.map((it, idx) => (
+                              <p key={idx} className="text-[9px] text-gray-600 flex items-center gap-1.5 font-medium">
+                                <CheckCircle className="h-2.5 w-2.5 text-green-500" /> {it.cantidad}x {it.nombre}
+                              </p>
+                            ))}
+                          </div>
+                          
+                          <div className="flex justify-between items-end border-t border-indigo-50 pt-3">
+                            <div>
+                              <p className="text-lg font-black text-indigo-700">$ {formatPrice(combo.precioCombo)}</p>
+                              <p className="text-[10px] text-gray-400 line-through">Reg. $ {formatPrice(combo.items.reduce((acc, i) => acc + (i.precioBase * i.cantidad), 0))}</p>
+                            </div>
+                            <Button size="sm" className="h-8 w-8 rounded-full bg-indigo-600 hover:bg-indigo-700 shadow-sm">
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                }
+
+                {/* 3. SERVICIOS (Unlimited or Recipe) */}
+                {(activeCategory === 'todos' || activeCategory === 'servicios') && 
+                  services
+                    .filter(s => (s.cantidad === 0 || (!s.cantidad && s.productosUsados?.length > 0)) && (!globalSearch || s.nombre.toLowerCase().includes(globalSearch.toLowerCase()) || s.categoria.toLowerCase().includes(globalSearch.toLowerCase())))
+                    .map(service => (
+                      <Card 
+                        key={service.id} 
+                        className="group hover:shadow-md transition-all cursor-pointer border-purple-50 hover:border-purple-300"
+                        onClick={() => addServiceToCart(service)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Building2 className="h-3 w-3 text-purple-500" />
+                                <span className="text-[10px] font-black uppercase text-purple-500 tracking-wider">Servicio</span>
+                              </div>
+                              <h3 className="font-bold text-gray-900 truncate group-hover:text-purple-600 transition-colors uppercase text-sm">
+                                {service.nombre}
+                              </h3>
+                              <p className="text-[10px] text-gray-500 font-bold uppercase">{service.categoria}</p>
+                            </div>
+                            <span className="text-[10px] font-black bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                              {service.productosUsados && service.productosUsados.length > 0 ? 'Con Receta' : 'Ilimitado'}
+                            </span>
+                          </div>
+                          
+                          <div className="flex justify-between items-end mt-4">
+                            <div>
+                              <p className="text-lg font-black text-green-600">$ {formatPrice(service.precioVenta)}</p>
+                              <p className="text-[10px] text-gray-400 font-bold uppercase">Ref: Bs {formatPrice(service.precioVenta * dolarPrice)}</p>
+                            </div>
+                            <Button size="sm" className="h-8 w-8 rounded-full bg-purple-600 hover:bg-purple-700 shadow-sm">
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                }
+
+                {/* 4. PRODUCCIÓN (Services with Stock) */}
+                {(activeCategory === 'todos' || activeCategory === 'produccion') && 
+                  services
+                    .filter(s => (s.cantidad > 0) && (!globalSearch || s.nombre.toLowerCase().includes(globalSearch.toLowerCase()) || s.categoria.toLowerCase().includes(globalSearch.toLowerCase())))
+                    .map(service => (
+                      <Card 
+                        key={service.id} 
+                        className="group hover:shadow-md transition-all cursor-pointer border-emerald-50 hover:border-emerald-300 bg-emerald-50/5"
+                        onClick={() => addServiceToCart(service)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Save className="h-3 w-3 text-emerald-500" />
+                                <span className="text-[10px] font-black uppercase text-emerald-500 tracking-wider">Producido</span>
+                              </div>
+                              <h3 className="font-bold text-gray-900 truncate group-hover:text-emerald-600 transition-colors uppercase text-sm">
+                                {service.nombre}
+                              </h3>
+                              <p className="text-[10px] text-gray-500 font-bold uppercase">{service.categoria}</p>
+                            </div>
+                            <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+                              Stock: {service.cantidad}
+                            </span>
+                          </div>
+                          
+                          <div className="flex justify-between items-end mt-4">
+                            <div>
+                              <p className="text-lg font-black text-green-600">$ {formatPrice(service.precioVenta)}</p>
+                              <p className="text-[10px] text-gray-400 font-bold uppercase">Ref: Bs {formatPrice(service.precioVenta * dolarPrice)}</p>
+                            </div>
+                            <Button size="sm" className="h-8 w-8 rounded-full bg-emerald-600 hover:bg-emerald-700 shadow-sm">
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                }
+
+              </div>
+
+              {/* Historial de Ventas (Moved here in a simpler way if needed, or kept separate) */}
+              <Card className="border-gray-100 shadow-sm border-dashed">
+                <CardHeader className="py-4">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                      <RotateCcw className="h-4 w-4 text-gray-500" /> Últimas Ventas
+                    </CardTitle>
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{sales.length} realizadas</span>
+                  </div>
+                </CardHeader>
+                <CardContent className="py-2">
+                  <div className="flex overflow-x-auto gap-3 pb-2 thin-scrollbar">
+                    {sales.slice().reverse().slice(0, 5).map((sale) => (
+                      <div key={sale.id} className="min-w-[200px] border border-gray-100 rounded-xl p-3 bg-white shadow-sm flex flex-col justify-between">
+                        <div>
+                          <p className="text-[10px] font-black text-blue-600 uppercase mb-1">
+                            {new Date(sale.fecha).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                          <p className="font-bold text-xs text-gray-800 truncate">{sale.items[0]?.nombre || 'Venta'}</p>
                         </div>
-                        <div className="text-left sm:text-right">
-                          {sale.moneda === 'Bs' ? (
-                            <>
-                              <p className="text-sm font-bold text-green-600">Bs {formatPrice(sale.total)}</p>
-                              <p className="text-xs text-gray-500">$ {formatPrice(sale.total / sale.tasaDolar)}</p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="text-sm font-bold text-green-600">$ {formatPrice(sale.total)}</p>
-                              <p className="text-xs text-gray-500">Bs {formatPrice(sale.total * sale.tasaDolar)}</p>
-                            </>
-                          )}
-                          <p className="text-xs font-medium text-blue-600 mt-1">{sale.items.length} item(s)</p>
+                        <div className="mt-2 pt-2 border-t border-gray-50 flex justify-between items-center">
+                          <span className="text-[10px] font-black text-green-600">$ {formatPrice(sale.total)}</span>
+                          <span className="text-[9px] text-gray-400">{getMetodoPagoLabel(sale.metodoPago)}</span>
                         </div>
                       </div>
                     ))}
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </div>
 
           {/* Carrito */}

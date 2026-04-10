@@ -230,6 +230,12 @@ export async function deleteServicio(id: string) {
   });
 }
 
+// ==================== PRODUCCIONES API ====================
+
+export async function getProducciones(userId: string) {
+  return fetchAPI(`/producciones.php?userId=${userId}`, { method: 'GET' });
+}
+
 // ==================== GASTOS API ====================
 
 export async function getGastos(userId: string) {

@@ -101,4 +101,3 @@ function sendError($code, $message, $logMessage = null) {
     echo json_encode(["success" => false, "message" => $message]);
     exit();
 }
-?>

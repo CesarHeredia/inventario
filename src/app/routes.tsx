@@ -14,6 +14,7 @@ import { Ofertas } from "./pages/Ofertas";
 import { RecoverAccount } from "./pages/RecoverAccount";
 import { Suscripcion } from "./pages/Suscripcion";
 import { AdminPanel } from "./pages/AdminPanel";
+import { Produccion } from "./pages/Produccion";
 import * as React from "react";
 
 // Helper to check if user is authenticated
@@ -95,6 +96,14 @@ export const router = createBrowserRouter([
     element: (
       <ProtectedRoute allowedRoles={['admin', 'jefe', 'subjefe']}>
         <Servicios />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/produccion",
+    element: (
+      <ProtectedRoute allowedRoles={['admin', 'jefe', 'subjefe']}>
+        <Produccion />
       </ProtectedRoute>
     ),
   },

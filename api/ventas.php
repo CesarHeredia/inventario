@@ -68,4 +68,3 @@ if ($method === 'GET') {
 } else {
     sendError(405, "Método no permitido");
 }
-?>
