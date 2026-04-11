@@ -224,20 +224,26 @@ export function AdminPanel() {
               <p className="text-sm font-bold text-gray-900">{user.nombre} {user.apellido}</p>
               <p className="text-[10px] font-black text-indigo-600 uppercase">Super Administrador</p>
            </div>
-           <DropdownMenu>
+            <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="bg-white hover:bg-gray-50 text-gray-900 border-2 border-gray-100 font-bold h-10 w-10 p-0 rounded-full shadow-sm">
+                <Button variant="outline" className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-10 w-10 p-0 rounded-full shadow-md">
                   <UserIcon className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 border-2 border-gray-100 shadow-xl rounded-2xl">
-                <DropdownMenuLabel className="font-bold">Administrador</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 cursor-pointer font-bold">
+              <DropdownMenuContent align="end" className="w-56 border-2 border-gray-100 shadow-xl rounded-2xl p-2">
+                <DropdownMenuLabel className="font-bold p-3">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold">{user.nombre} {user.apellido}</span>
+                    <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tighter">Administrador</span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-gray-100" />
+                <DropdownMenuSeparator className="bg-gray-100" />
+                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 rounded-xl cursor-pointer py-2.5">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
               </DropdownMenuContent>
-           </DropdownMenu>
+            </DropdownMenu>
         </div>
       </header>
 

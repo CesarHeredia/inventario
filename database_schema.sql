@@ -168,5 +168,27 @@ CREATE TABLE IF NOT EXISTS producciones (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
+-- TABLA: movimientos_inventario
+-- Registra todas las entradas, salidas y pérdidas de stock
+-- =====================================================
+CREATE TABLE IF NOT EXISTS movimientos_inventario (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  usuarioId INT NOT NULL,
+  productoId INT NULL, -- Puede ser NULL si el producto se elimina después
+  productoNombre VARCHAR(255) NOT NULL,
+  tipo ENUM('entrada', 'venta', 'consumo_servicio', 'consumo_produccion', 'perdida') NOT NULL,
+  cantidad DECIMAL(10, 2) NOT NULL,
+  precioCompra DECIMAL(15, 2) DEFAULT 0,
+  precioVenta DECIMAL(15, 2) DEFAULT 0,
+  moneda ENUM('Bs', '$') DEFAULT 'Bs',
+  descripcion TEXT NULL, -- Razón de la pérdida o detalle extra
+  fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_usuario (usuarioId),
+  INDEX idx_producto (productoId),
+  INDEX idx_tipo (tipo),
+  FOREIGN KEY (usuarioId) REFERENCES usuarios(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================
 -- FIN DEL SCRIPT
 -- =====================================================

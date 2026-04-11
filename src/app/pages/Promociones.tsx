@@ -332,22 +332,26 @@ export function Promociones() {
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-10 w-10 p-0 rounded-full">
+                <Button variant="outline" className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-10 w-10 p-0 rounded-full shadow-md">
                   <UserIcon className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 border-2 border-gray-300">
-                <DropdownMenuLabel className="font-bold text-gray-900">
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-bold">{user.nombre} {user.apellido}</p>
-                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Rol: {user.rol || 'jefe'}</p>
+              <DropdownMenuContent align="end" className="w-56 border-2 border-gray-100 shadow-xl rounded-2xl p-2">
+                <DropdownMenuLabel className="font-bold p-3">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-bold">{user.nombre} {user.apellido}</span>
+                    <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tighter">{user.rol || 'jefe'}</span>
                   </div>
                 </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/perfil')}><UserIcon className="mr-2 h-4 w-4" /> Perfil</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/trabajadores')}><UserCog className="mr-2 h-4 w-4" /> Trabajadores</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600">
+                <DropdownMenuSeparator className="bg-gray-100" />
+                <DropdownMenuItem onClick={() => navigate('/perfil')} className="rounded-xl cursor-pointer py-2.5">
+                  <UserIcon className="mr-2 h-4 w-4 text-blue-500" /> Perfil
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/trabajadores')} className="rounded-xl cursor-pointer py-2.5">
+                  <UserCog className="mr-2 h-4 w-4 text-purple-500" /> Trabajadores
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-gray-100" />
+                <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 rounded-xl cursor-pointer py-2.5">
                   <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </DropdownMenuItem>
               </DropdownMenuContent>

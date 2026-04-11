@@ -585,6 +585,18 @@ export function Ventas() {
           if (product) {
             const newCantidad = product.cantidad - item.cantidad;
             updatePromises.push(api.updateProducto(product.id, { cantidad: newCantidad }));
+            // Log movement
+            updatePromises.push(api.addMovimiento({
+              usuarioId: ownerId,
+              productoId: product.id,
+              productoNombre: product.nombre,
+              tipo: 'venta',
+              cantidad: item.cantidad,
+              precioCompra: product.precioCompra,
+              precioVenta: item.precioUnitario,
+              moneda: product.monedaCompra,
+              descripcion: `Venta a ${checkoutForm.clienteNombre || 'Cliente Contado'}`
+            }));
           }
         } else if (item.tipo === 'servicio') {
           const service = services.find(s => s.id === item.originalId);
@@ -596,12 +608,33 @@ export function Ventas() {
                 if (product) {
                   const newQty = product.cantidad - (pu.cantidad * item.cantidad);
                   updatePromises.push(api.updateProducto(product.id, { cantidad: newQty }));
+                  // Log movement
+                  updatePromises.push(api.addMovimiento({
+                    usuarioId: ownerId,
+                    productoId: product.id,
+                    productoNombre: product.nombre,
+                    tipo: 'consumo_servicio',
+                    cantidad: pu.cantidad * item.cantidad,
+                    precioCompra: product.precioCompra,
+                    moneda: product.monedaCompra,
+                    descripcion: `Gasto por servicio: ${service.nombre}`
+                  }));
                 }
               });
             } else if (service.cantidad > 0) {
               // Si tenía stock propio, restarlo
               const newCantidad = service.cantidad - item.cantidad;
               updatePromises.push(api.updateServicio(service.id, { ...service, cantidad: newCantidad }));
+              // Log movement (optional, but good for traceability of produced stock)
+              updatePromises.push(api.addMovimiento({
+                usuarioId: ownerId,
+                productoId: service.id, // Using service ID as product ID for trace
+                productoNombre: `[PROD] ${service.nombre}`,
+                tipo: 'venta',
+                cantidad: item.cantidad,
+                precioVenta: item.precioUnitario,
+                descripcion: `Venta stock producido: ${service.nombre}`
+              }));
             }
           }
         }
@@ -740,39 +773,27 @@ export function Ventas() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-9 w-9 p-0 rounded-full flex-shrink-0 ml-2 sm:ml-4"
-                  >
+                  <Button variant="outline" className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-10 w-10 p-0 rounded-full shadow-md">
                     <UserIcon className="h-5 w-5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 border-2 border-gray-300">
-                  <DropdownMenuLabel className="font-bold text-gray-900">
-                    <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-bold">{user.nombre} {user.apellido}</p>
-                      <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Rol: {user.rol || 'jefe'}</p>
+                <DropdownMenuContent align="end" className="w-56 border-2 border-gray-100 shadow-xl rounded-2xl p-2">
+                  <DropdownMenuLabel className="font-bold p-3">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold">{user.nombre} {user.apellido}</span>
+                      <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tighter">{user.rol || 'jefe'}</span>
                     </div>
                   </DropdownMenuLabel>
-                  <DropdownMenuSeparator className="bg-gray-300" />
-                  <DropdownMenuItem 
-                    className="cursor-pointer font-semibold hover:bg-blue-50"
-                    onClick={() => navigate('/perfil')}
-                  >
-                    <UserIcon className="mr-2 h-4 w-4 text-blue-600" />
-                    <span>Perfil</span>
+                  <DropdownMenuSeparator className="bg-gray-100" />
+                  <DropdownMenuItem onClick={() => navigate('/perfil')} className="rounded-xl cursor-pointer py-2.5">
+                    <UserIcon className="mr-2 h-4 w-4 text-blue-500" /> Perfil
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-gray-300" />
-                  <DropdownMenuItem 
-                    className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
-                    onClick={() => {
-                      sessionStorage.removeItem('currentUser');
-                      toast.success('Sesión cerrada exitosamente');
-                      navigate('/login');
-                    }}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Cerrar Sesión</span>
+                  <DropdownMenuItem onClick={() => navigate('/trabajadores')} className="rounded-xl cursor-pointer py-2.5">
+                    <UserCog className="mr-2 h-4 w-4 text-purple-500" /> Trabajadores
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-gray-100" />
+                  <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 rounded-xl cursor-pointer py-2.5">
+                    <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

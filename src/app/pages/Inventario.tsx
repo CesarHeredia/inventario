@@ -22,7 +22,32 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Package, Plus, ArrowLeft, Search, Edit, Trash2, Building2, X, LogOut, User as UserIcon, UserCog, Save, DollarSign, TrendingUp } from "lucide-react";
+import { 
+  Package, 
+  Plus, 
+  ArrowLeft, 
+  Search, 
+  Edit, 
+  Trash2, 
+  Building2, 
+  X, 
+  LogOut, 
+  User as UserIcon, 
+  UserCog, 
+  Save as SaveIcon, 
+  DollarSign, 
+  TrendingUp,
+  History,
+  AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Filter,
+  Calendar,
+  ListOrdered,
+  ShoppingCart,
+  Briefcase
+} from "lucide-react";
+import { Separator } from "../components/ui/separator";
 import { toast } from "sonner";
 import { useDolarPrice } from "../hooks/useDolarPrice";
 import * as api from "../../utils/api";
@@ -78,6 +103,20 @@ export function Inventario() {
   const [unidadesPorPaquete, setUnidadesPorPaquete] = useState("");
   const [cantidadPaquetes, setCantidadPaquetes] = useState("");
   const [precioPaquete, setPrecioPaquete] = useState("");
+  // Navigation and Tabs
+  const [activeTab, setActiveTab] = useState<'lista' | 'historial'>('lista');
+  
+  // History State
+  const [movimientos, setMovimientos] = useState<any[]>([]);
+  const [isHistorialLoading, setIsHistorialLoading] = useState(false);
+
+  // Loss Dialog State
+  const [isLossDialogOpen, setIsLossDialogOpen] = useState(false);
+  const [lossData, setLossData] = useState({
+    productoId: "",
+    cantidad: "",
+    descripcion: ""
+  });
 
   const [formData, setFormData] = useState({
     nombre: "",
@@ -92,19 +131,26 @@ export function Inventario() {
     monedaCompra: 'Bs' as '$' | 'Bs',
     monedaVenta: '$' as '$' | 'Bs'
   });
-
   useEffect(() => {
     const storedUser = sessionStorage.getItem('currentUser');
-    if (!storedUser) {
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    } else {
       navigate('/login');
-      return;
     }
-    const parsedUser = JSON.parse(storedUser);
-    setUser(parsedUser);
-    const userRole = parsedUser.rol || parsedUser.tipoUsuario;
-    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? parsedUser.jefeId : parsedUser.id || '');
+  }, [navigate]);
 
-    // Cargar productos de la base de datos MySQL
+  useEffect(() => {
+    if (user) {
+      refreshInventory();
+      refreshMovimientos();
+    }
+  }, [user]);
+
+  const refreshInventory = () => {
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
+    if (!ownerId) return;
+    
     api.getInventario(ownerId)
       .then(response => {
         if (response.success) {
@@ -125,44 +171,26 @@ export function Inventario() {
           }));
           setProducts(mappedProducts);
         }
-      })
-      .catch(error => {
-        console.error("Error al cargar inventario:", error);
-        toast.error("Error al conectar con la base de datos");
-        
-        // Fallback a localStorage si falla la API (opcional, mejor no para evitar confusiones)
-        const savedProducts = localStorage.getItem('products');
-        if (savedProducts) {
-          const allProducts = JSON.parse(savedProducts);
-          const userProducts = allProducts.filter((p: any) => String(p.usuarioId) === ownerId);
-          setProducts(userProducts);
-        }
       });
-  }, [navigate]);
-
-  const refreshInventory = () => {
-    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
-    api.getInventario(ownerId).then(response => {
-      if (response.success) {
-        const mappedProducts = response.productos.map((p: any) => ({
-          id: String(p.id),
-          nombre: p.nombre,
-          descripcion: p.descripcion || "",
-          cantidad: parseFloat(p.cantidad),
-          unidadMedida: p.unidadMedida,
-          precioCompra: parseFloat(p.costoBolivares),
-          monedaCompra: p.monedaCompra || 'Bs',
-          precioVenta: p.precioVentaDolares ? parseFloat(p.precioVentaDolares) : undefined,
-          monedaVenta: p.monedaVenta || '$',
-          categoria: p.categoria || "General",
-          tipo: p.tipo,
-          fechaRegistro: p.fechaCreacion,
-          usuarioId: String(p.usuarioId)
-        }));
-        setProducts(mappedProducts);
-      }
-    });
   };
+
+  const refreshMovimientos = () => {
+    const ownerId = String((user?.rol === 'trabajador' || user?.rol === 'subjefe') ? user?.jefeId : user?.id || '');
+    if (!ownerId) return;
+
+    setIsHistorialLoading(true);
+    api.getMovimientos(ownerId)
+      .then(res => {
+        if (res.success) setMovimientos(res.movimientos);
+      })
+      .finally(() => setIsHistorialLoading(false));
+  };
+
+  useEffect(() => {
+    if (activeTab === 'historial') {
+      refreshMovimientos();
+    }
+  }, [activeTab]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -304,6 +332,51 @@ export function Inventario() {
     setIsNewProduct(false);
   };
 
+  const handleRegisterLoss = async () => {
+    if (!lossData.productoId || !lossData.cantidad || !lossData.descripcion) {
+      toast.error("Por favor complete todos los campos");
+      return;
+    }
+
+    const product = products.find(p => p.id === lossData.productoId);
+    if (!product) return;
+
+    const qty = parseFloat(lossData.cantidad);
+    if (qty > product.cantidad) {
+      toast.error(`No puedes registrar una pérdida mayor al stock disponible (${product.cantidad})`);
+      return;
+    }
+
+    const userRole = user?.rol || user?.tipoUsuario;
+    const ownerId = String((userRole === 'trabajador' || userRole === 'subjefe') ? user?.jefeId : user?.id || '');
+
+    try {
+      const res = await api.addMovimiento({
+        usuarioId: ownerId,
+        productoId: product.id,
+        productoNombre: product.nombre,
+        tipo: 'perdida',
+        cantidad: qty,
+        precioCompra: product.precioCompra,
+        moneda: product.monedaCompra,
+        descripcion: lossData.descripcion
+      });
+
+      if (res.success) {
+        toast.success("Pérdida registrada correctamente");
+        setIsLossDialogOpen(false);
+        setLossData({ productoId: "", cantidad: "", descripcion: "" });
+        refreshInventory();
+        refreshMovimientos();
+      } else {
+        toast.error(res.message || "Error al registrar la pérdida");
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Error de conexión");
+    }
+  };
+
   const handleDelete = (id: string) => {
     if (confirm('¿Estás seguro de eliminar este producto?')) {
       api.deleteProducto(id)
@@ -400,25 +473,62 @@ export function Inventario() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center py-4 gap-3">
-            <div className="flex-1 flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-                <ArrowLeft className="h-5 w-5" />
+      <header className="bg-white border-b sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => navigate('/dashboard')}
+                className="hover:bg-blue-50"
+              >
+                <ArrowLeft className="h-4 w-4" />
               </Button>
-              <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-2 rounded-lg">
-                  <Package className="h-5 w-5 text-white" />
+              <div className="flex items-center gap-2">
+                <div className="bg-blue-600 p-2 rounded-lg text-white">
+                  <Package className="h-5 w-5" />
                 </div>
                 <div>
-                  <h1 className="font-semibold text-lg">Inventario</h1>
-                  <p className="text-sm text-gray-500">{user.nombreEmpresa}</p>
+                  <h1 className="text-xl font-bold text-gray-900 leading-tight">Inventario de Productos</h1>
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">{user.nombreEmpresa}</p>
                 </div>
               </div>
             </div>
-            <div className="flex-1 flex justify-end gap-2">
-              <Button onClick={() => { resetForm(); setIsDialogOpen(true); }} size="sm">
+
+            <div className="flex-1 flex justify-end items-center gap-2">
+              <div className="bg-white border-2 border-indigo-100 p-1 rounded-xl flex items-center shadow-sm mr-4">
+                <Button 
+                  variant={activeTab === 'lista' ? 'default' : 'ghost'} 
+                  size="sm" 
+                  onClick={() => setActiveTab('lista')}
+                  className={`rounded-lg transition-all ${activeTab === 'lista' ? 'bg-indigo-600 shadow-md' : 'text-indigo-600 hover:bg-indigo-50'}`}
+                >
+                  <Package className="mr-2 h-4 w-4" />
+                  Lista
+                </Button>
+                <Button 
+                  variant={activeTab === 'historial' ? 'default' : 'ghost'} 
+                  size="sm" 
+                  onClick={() => setActiveTab('historial')}
+                  className={`rounded-lg transition-all ${activeTab === 'historial' ? 'bg-indigo-600 shadow-md' : 'text-indigo-600 hover:bg-indigo-50'}`}
+                >
+                  <History className="mr-2 h-4 w-4" />
+                  Historial
+                </Button>
+              </div>
+
+              <Button 
+                onClick={() => setIsLossDialogOpen(true)} 
+                variant="outline" 
+                size="sm" 
+                className="border-2 border-red-200 text-red-600 hover:bg-red-50 font-bold hidden md:flex"
+              >
+                <AlertTriangle className="mr-2 h-4 w-4" />
+                Registrar Pérdida
+              </Button>
+
+              <Button onClick={() => { resetForm(); setIsDialogOpen(true); }} size="sm" className="bg-indigo-600 hover:bg-indigo-700 shadow-md">
                 <Plus className="mr-2 h-4 w-4" />
                 <span className="hidden sm:inline">Agregar Producto</span>
                 <span className="sm:hidden">Nuevo</span>
@@ -426,46 +536,27 @@ export function Inventario() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-9 w-9 p-0 rounded-full flex-shrink-0 ml-2"
-                  >
+                  <Button variant="outline" className="bg-blue-600 hover:bg-blue-700 text-white border-2 border-blue-700 font-bold h-10 w-10 p-0 rounded-full shadow-md">
                     <UserIcon className="h-5 w-5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 border-2 border-gray-300">
-                  <DropdownMenuLabel className="font-bold text-gray-900">
-                    <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-bold">{user.nombre} {user.apellido}</p>
-                      <p className="text-xs font-normal text-gray-600">Rol: {user.rol || 'jefe'}</p>
+                <DropdownMenuContent align="end" className="w-56 border-2 border-gray-100 shadow-xl rounded-2xl p-2">
+                  <DropdownMenuLabel className="font-bold p-3">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold">{user.nombre} {user.apellido}</span>
+                      <span className="text-[10px] text-gray-400 font-medium uppercase tracking-tighter">{user.rol || 'jefe'}</span>
                     </div>
                   </DropdownMenuLabel>
-                  <DropdownMenuSeparator className="bg-gray-300" />
-                  <DropdownMenuItem 
-                    className="cursor-pointer font-semibold hover:bg-blue-50"
-                    onClick={() => navigate('/perfil')}
-                  >
-                    <UserIcon className="mr-2 h-4 w-4 text-blue-600" />
-                    <span>Perfil</span>
+                  <DropdownMenuSeparator className="bg-gray-100" />
+                  <DropdownMenuItem onClick={() => navigate('/perfil')} className="rounded-xl cursor-pointer py-2.5">
+                    <UserIcon className="mr-2 h-4 w-4 text-blue-500" /> Perfil
                   </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    className="cursor-pointer font-semibold hover:bg-purple-50"
-                    onClick={() => navigate('/trabajadores')}
-                  >
-                    <UserCog className="mr-2 h-4 w-4 text-purple-600" />
-                    <span>Trabajadores</span>
+                  <DropdownMenuItem onClick={() => navigate('/trabajadores')} className="rounded-xl cursor-pointer py-2.5">
+                    <UserCog className="mr-2 h-4 w-4 text-purple-500" /> Trabajadores
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-gray-300" />
-                  <DropdownMenuItem 
-                    className="cursor-pointer font-semibold hover:bg-red-50 text-red-600"
-                    onClick={() => {
-                      sessionStorage.removeItem('currentUser');
-                      toast.success('Sesión cerrada exitosamente');
-                      navigate('/login');
-                    }}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Cerrar Sesión</span>
+                  <DropdownMenuSeparator className="bg-gray-100" />
+                  <DropdownMenuItem onClick={() => { sessionStorage.removeItem('currentUser'); navigate('/login'); }} className="text-red-600 rounded-xl cursor-pointer py-2.5">
+                    <LogOut className="mr-2 h-4 w-4" /> Cerrar Sesión
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -532,584 +623,550 @@ export function Inventario() {
           </CardContent>
         </Card>
 
-        {/* Products Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Lista de Productos</CardTitle>
-            <CardDescription>
-              Gestiona tu inventario de productos
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {filteredProducts.length === 0 ? (
-              <div className="text-center py-12">
-                <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No hay productos
-                </h3>
-                <p className="text-gray-500 mb-4">
-                  {searchTerm ? 'No se encontraron productos con ese criterio de búsqueda' : 'Comienza agregando tu primer producto al inventario'}
-                </p>
-                {!searchTerm && (
-                  <Button onClick={() => setIsDialogOpen(true)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Agregar Producto
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead>Categoría</TableHead>
-                      <TableHead className="text-right">Cantidad</TableHead>
-                      <TableHead className="text-right">Precio Compra</TableHead>
-                      <TableHead className="text-right">Precio Venta</TableHead>
-                      <TableHead className="text-right">Valor Total</TableHead>
-                      <TableHead className="text-center">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredProducts.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell className="font-medium">{product.nombre}</TableCell>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{product.categoria}</div>
-                            <div className="text-sm text-gray-500">{product.descripcion}</div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">{product.cantidad} {product.unidadMedida}{product.cantidad !== 1 ? 's' : ''}</TableCell>
-                        <TableCell className="text-right">{product.monedaCompra} {formatPrice(product.precioCompra)}</TableCell>
-                        <TableCell className="text-right">
-                          {product.tipo === 'venta' ? (
-                            <div>
-                              <div className="font-medium">{product.monedaVenta} {formatPrice(product.precioVenta || 0)}</div>
-                              <div className="text-xs text-gray-500">{product.monedaCompra} {formatPrice((product.precioVenta || 0) * dolarPrice)}</div>
-                            </div>
-                          ) : '-'}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {product.tipo === 'venta' ? (
-                            <div>
-                              <div className="font-medium">{product.monedaVenta} {formatPrice(product.cantidad * (product.precioVenta || 0))}</div>
-                              <div className="text-xs text-gray-500">{product.monedaCompra} {formatPrice(product.cantidad * (product.precioVenta || 0) * dolarPrice)}</div>
-                            </div>
-                          ) : '-'}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center justify-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(product)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(product.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </main>
-
-      {/* Add/Edit Product Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingProduct ? 'Editar Producto' : 'Agregar Nuevo Producto'}
-            </DialogTitle>
-            <DialogDescription>
-              {editingProduct ? 'Modifica los datos del producto' : 'Completa los datos del nuevo producto'}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSubmit}>
-            <div className="grid gap-4 py-4">
-              {/* Solo mostrar selector de producto si NO estamos editando */}
-              {!editingProduct && (
-                <div className="space-y-2 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                  <Label>¿Es un producto nuevo o existente?</Label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="productType"
-                        checked={isNewProduct}
-                        onChange={() => {
-                          setIsNewProduct(true);
-                          setSelectedExistingProduct("");
-                          resetForm();
-                        }}
-                        className="w-4 h-4"
-                      />
-                      <span>Producto Nuevo</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="productType"
-                        checked={!isNewProduct}
-                        onChange={() => setIsNewProduct(false)}
-                        disabled={products.length === 0}
-                        className="w-4 h-4"
-                      />
-                      <span>Producto Existente</span>
-                    </label>
+        {/* Main Content Area */}
+        <div className="space-y-6">
+          {activeTab === 'lista' ? (
+            <>
+              {/* Products Table */}
+              <Card className="border-none shadow-xl bg-white/80 backdrop-blur-sm">
+                <CardHeader className="border-b border-gray-100 pb-4">
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <CardTitle className="text-xl font-black text-gray-900">Existencias Disponibles</CardTitle>
+                      <CardDescription className="font-medium text-gray-500">Monitoriza y gestiona el stock físico de tu negocio</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full uppercase tracking-widest">
+                      <ListOrdered className="h-4 w-4" /> {filteredProducts.length} Items encontrados
+                    </div>
                   </div>
-                  
-                  {!isNewProduct && (
-                    <div className="mt-3">
-                      <Label htmlFor="existingProduct">Seleccionar Producto *</Label>
-                      <select
-                        id="existingProduct"
-                        value={selectedExistingProduct}
-                        onChange={(e) => handleExistingProductChange(e.target.value)}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-                      >
-                        <option value="">-- Selecciona un producto --</option>
-                        {products.map((product) => (
-                          <option key={product.id} value={product.id}>
-                            {product.nombre} - {product.categoria} (Stock actual: {product.cantidad})
-                          </option>
-                        ))}
-                      </select>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  {filteredProducts.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="bg-gray-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-dashed border-gray-200">
+                        <Package className="h-10 w-10 text-gray-300" />
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-900">No se encontraron productos</h3>
+                      <p className="text-gray-500 max-w-xs mx-auto mt-1">Intenta con otros términos de búsqueda o agrega un nuevo producto.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-gray-100">
+                      <Table>
+                        <TableHeader className="bg-gray-50/50">
+                          <TableRow className="hover:bg-transparent border-b border-gray-100">
+                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 py-4">Producto / Categoría</TableHead>
+                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 text-right py-4">Cantidad / Stock</TableHead>
+                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 text-right py-4">P. Compra</TableHead>
+                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 text-right py-4">P. Venta</TableHead>
+                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 text-right py-4">Inversión Total</TableHead>
+                            <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 text-center py-4">Acciones</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredProducts.map((product) => (
+                            <TableRow key={product.id} className="group hover:bg-blue-50/30 transition-colors border-b border-gray-50">
+                              <TableCell className="py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="bg-indigo-50 p-2 rounded-lg text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                                    <Package className="h-4 w-4" />
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-gray-900 uppercase text-xs">{product.nombre}</div>
+                                    <div className="text-[10px] font-black text-indigo-400 uppercase tracking-tighter">{product.categoria}</div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right py-4">
+                                <div className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-black uppercase ${product.cantidad <= 5 ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-green-100 text-green-700'}`}>
+                                  {product.cantidad} {product.unidadMedida}s
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-medium py-4 text-xs">
+                                {product.monedaCompra} {formatPrice(product.precioCompra)}
+                              </TableCell>
+                              <TableCell className="text-right font-bold text-green-600 py-4 text-xs">
+                                {product.monedaVenta || '$'} {formatPrice(product.precioVenta || 0)}
+                              </TableCell>
+                              <TableCell className="text-right py-4">
+                                <div className="font-black text-indigo-700 text-xs">
+                                  {product.monedaCompra} {formatPrice(product.cantidad * product.precioCompra)}
+                                </div>
+                                <div className="text-[9px] font-bold text-gray-400">
+                                  $ {formatPrice((product.cantidad * product.precioCompra) / (product.monedaCompra === 'Bs' ? dolarPrice : 1))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-center py-4">
+                                <div className="flex justify-center gap-1">
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-8 w-8 p-0 rounded-full hover:bg-indigo-600 hover:text-white transition-all"
+                                    onClick={() => handleEdit(product)}
+                                  >
+                                    <Edit className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-8 w-8 p-0 rounded-full hover:bg-red-600 hover:text-white transition-all"
+                                    onClick={() => handleDelete(product.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            </>
+          ) : (
+            /* History View */
+            <Card className="border-none shadow-xl bg-white/80 backdrop-blur-sm">
+              <CardHeader className="border-b border-gray-100 pb-4">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <CardTitle className="text-xl font-black text-gray-900">Historial de Movimientos</CardTitle>
+                    <CardDescription className="font-medium text-gray-500">Trazabilidad completa de cada cambio en tu stock</CardDescription>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={refreshMovimientos} disabled={isHistorialLoading}>
+                    <History className={`h-4 w-4 mr-2 ${isHistorialLoading ? 'animate-spin' : ''}`} />
+                    Actualizar
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {isHistorialLoading ? (
+                  <div className="py-20 text-center space-y-4">
+                     <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mx-auto"></div>
+                     <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Cargando Trazabilidad...</p>
+                  </div>
+                ) : movimientos.length === 0 ? (
+                  <div className="py-20 text-center">
+                    <History className="h-12 w-12 text-gray-200 mx-auto mb-4" />
+                    <p className="text-gray-400 font-bold uppercase text-xs">No hay movimientos registrados aún</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-gray-100">
+                    <Table>
+                      <TableHeader className="bg-gray-50/50">
+                        <TableRow className="hover:bg-transparent border-b border-gray-100">
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 py-4">Fecha / Hora</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 py-4">Actividad</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 py-4">Producto</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 text-right py-4">Cantidad</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-gray-500 py-4">Detalles / Razón</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {movimientos.map((mov) => {
+                          const getTipoDetails = (tipo: string) => {
+                            switch(tipo) {
+                              case 'entrada': return { label: 'Entrada', color: 'bg-green-100 text-green-700', icon: <ArrowUpRight className="h-3 w-3" /> };
+                              case 'venta': return { label: 'Venta', color: 'bg-blue-100 text-blue-700', icon: <ShoppingCart className="h-3 w-3" /> };
+                              case 'perdida': return { label: 'Pérdida', color: 'bg-red-100 text-red-700', icon: <AlertTriangle className="h-3 w-3" /> };
+                              case 'consumo_servicio': return { label: 'Consumo Serv.', color: 'bg-purple-100 text-purple-700', icon: <Briefcase className="h-3 w-3" /> };
+                              case 'consumo_produccion': return { label: 'Consumo Prod.', color: 'bg-orange-100 text-orange-700', icon: <SaveIcon className="h-3 w-3" /> };
+                              default: return { label: tipo, color: 'bg-gray-100 text-gray-700', icon: <Package className="h-3 w-3" /> };
+                            }
+                          };
+                          const details = getTipoDetails(mov.tipo);
+                          return (
+                            <TableRow key={mov.id} className="hover:bg-gray-50/50 border-b border-gray-50">
+                              <TableCell className="py-4">
+                                <div className="text-[10px] font-bold text-gray-500 flex items-center gap-2">
+                                  <Calendar className="h-3 w-3" />
+                                  {new Date(mov.fecha).toLocaleString('es-VE')}
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${details.color}`}>
+                                  {details.icon}
+                                  {details.label}
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <div className="font-bold text-gray-900 text-xs uppercase">{mov.productoNombre}</div>
+                              </TableCell>
+                              <TableCell className="text-right py-4">
+                                <div className={`font-black text-xs ${mov.tipo === 'entrada' ? 'text-green-600' : 'text-red-500'}`}>
+                                  {mov.tipo === 'entrada' ? '+' : '-'}{mov.cantidad}
+                                </div>
+                                <div className="text-[9px] font-bold text-gray-400 italic">
+                                  {mov.moneda} {formatPrice(mov.precioCompra)} c/u
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-4">
+                                <p className="text-[10px] text-gray-600 font-medium italic max-w-xs">{mov.descripcion || '-'}</p>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </main>
+
+      {/* Agregar Producto Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] p-0 overflow-hidden border-none shadow-2xl bg-white">
+          <div className="bg-blue-600 px-8 py-6 text-white relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+              <Package className="h-24 w-24 rotate-12" />
+            </div>
+            <DialogTitle className="text-2xl font-black flex items-center gap-3 uppercase tracking-tight">
+              {editingProduct ? <Edit className="h-6 w-6" /> : (isNewProduct ? <Plus className="h-6 w-6" /> : <TrendingUp className="h-6 w-6" />)}
+              {editingProduct ? 'Editar Producto' : (isNewProduct ? 'Nuevo Producto' : 'Reponer Stock')}
+            </DialogTitle>
+            <DialogDescription className="text-blue-100 font-medium mt-1">
+              {editingProduct ? 'Modifica los datos del producto seleccionado' : (isNewProduct ? 'Añade un nuevo ítem a tu catálogo de inventario' : 'Registra la entrada de nueva mercancía')}
+            </DialogDescription>
+          </div>
+
+          <form onSubmit={handleSubmit} className="p-8">
+            <div className="grid gap-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+              {/* Selección de Producto (Solo si es reponer stock) */}
+              {!isNewProduct && !editingProduct && (
+                <div className="space-y-3">
+                  <Label className="text-[11px] font-black text-blue-900 uppercase tracking-widest flex items-center gap-2">
+                    <Search className="h-3 w-3" /> 1. Selecciona el producto a reponer
+                  </Label>
+                  <select
+                    className="w-full h-12 px-4 bg-blue-50 border-2 border-blue-100 rounded-xl focus:border-blue-500 focus:ring-0 transition-all font-bold text-blue-900"
+                    value={selectedExistingProduct}
+                    onChange={(e) => handleExistingProductChange(e.target.value)}
+                  >
+                    <option value="">Buscar en el inventario...</option>
+                    {products.map(p => (
+                      <option key={p.id} value={p.id}>{p.nombre} (Stock: {p.cantidad} {p.unidadMedida}s)</option>
+                    ))}
+                  </select>
                 </div>
               )}
 
-              {(isNewProduct || editingProduct) && (
+              {/* Información Básica */}
+              {(isNewProduct || editingProduct || selectedExistingProduct) && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="nombre">Nombre del Producto *</Label>
+                      <Input
+                        id="nombre"
+                        placeholder="Ej: Pintura de Labios"
+                        value={formData.nombre}
+                        onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                        required
+                        maxLength={100}
+                        disabled={!isNewProduct && !editingProduct}
+                      />
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="categoria">Categoría *</Label>
                       <Input
                         id="categoria"
-                        list="categorias-inventario"
-                        placeholder="Electrónica, Ropa, etc."
+                        placeholder="Ej: Cosméticos"
                         value={formData.categoria}
                         onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
                         required
                         maxLength={100}
+                        disabled={!isNewProduct && !editingProduct}
                       />
-                      <datalist id="categorias-inventario">
-                        {categoriasUnicas.map((cat, index) => (
-                          <option key={index} value={cat} />
-                        ))}
-                      </datalist>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tipo">Tipo *</Label>
-                      <select
-                        id="tipo"
-                        value={formData.tipo}
-                        onChange={(e) => setFormData({ ...formData, tipo: e.target.value as 'venta' | 'servicio' })}
-                        required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="venta">Venta</option>
-                        <option value="servicio">Servicio</option>
-                      </select>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="nombre">Nombre del Producto *</Label>
-                    <Input
-                      id="nombre"
-                      placeholder="Laptop HP"
-                      value={formData.nombre}
-                      onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                      required
-                      maxLength={100}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="descripcion">Descripción</Label>
+                    <Label htmlFor="descripcion">Descripción (Opcional)</Label>
                     <Input
                       id="descripcion"
                       placeholder="Descripción detallada del producto"
                       value={formData.descripcion}
                       onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
                       maxLength={100}
+                      disabled={!isNewProduct && !editingProduct}
                     />
                   </div>
-                </>
-              )}
 
-              {/* Campos para agregar stock a producto existente */}
-              {!isNewProduct && !editingProduct && selectedExistingProduct && (
-                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-5 space-y-4 shadow-inner">
-                  <div className="flex justify-between items-center border-b border-blue-100 pb-2">
-                    <h3 className="font-black text-blue-900 uppercase text-xs tracking-wider">Actualizar Inventario</h3>
-                    <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-200">
-                      {formData.nombre}
-                    </Badge>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white p-3 rounded border border-blue-100">
-                      <Label className="text-[10px] text-gray-500 uppercase font-bold">Stock Actual</Label>
-                      <div className="text-xl font-black text-blue-900">
-                        {formData.cantidad} <span className="text-xs font-medium text-gray-500 uppercase">{formData.unidadMedida}s</span>
+                  {/* Campos para agregar stock a producto existente */}
+                  {!isNewProduct && !editingProduct && selectedExistingProduct && (
+                    <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-5 space-y-4 shadow-inner mt-2">
+                      <div className="flex justify-between items-center border-b border-blue-100 pb-2">
+                        <h3 className="font-black text-blue-900 uppercase text-xs tracking-wider">Actualizar Inventario</h3>
+                        <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-200">
+                          {formData.nombre}
+                        </Badge>
                       </div>
-                    </div>
-                    <div className="bg-white p-3 rounded border border-blue-100">
-                      <Label className="text-[10px] text-gray-500 uppercase font-bold">Costo Actual (Bruto)</Label>
-                      <div className="text-xl font-black text-green-700">
-                        {formData.monedaCompra} {formatPrice(parseFloat(formData.precioCompra || "0"))}
-                      </div>
-                    </div>
-                  </div>
 
-                  {formData.unidadMedida === 'paquete' ? (
-                    <div className="space-y-4">
-                      <div className="bg-white p-4 rounded-lg border border-blue-200 space-y-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs font-black text-blue-800 uppercase">1. Especificar Contenido del Paquete</Label>
-                          <div className="flex items-center gap-2">
+                      {formData.unidadMedida === 'paquete' ? (
+                        <div className="space-y-4">
+                          <div className="bg-white p-4 rounded-lg border border-blue-200 space-y-3">
+                            <Label className="text-xs font-black text-blue-800 uppercase block">1. Especificar Contenido del Paquete</Label>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                placeholder="Ej: 24"
+                                value={unidadesPorPaquete}
+                                onChange={(e) => setUnidadesPorPaquete(e.target.value)}
+                                className="h-10 border-blue-300 focus:ring-blue-500 font-bold"
+                                required
+                              />
+                              <span className="text-xs font-bold text-gray-500">unidades / paquete</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-white p-4 rounded-lg border border-purple-200">
+                            <Label className="text-xs font-black text-purple-800 uppercase block">2. ¿Cuántos Paquetes vas a agregar?</Label>
                             <Input
+                              type="number"
+                              placeholder="Ej: 5"
+                              value={cantidadPaquetes}
+                              onChange={(e) => setCantidadPaquetes(e.target.value)}
+                              className="h-10 border-purple-300 focus:ring-purple-500 font-bold text-lg"
+                              required
+                            />
+                          </div>
+
+                          <div className="bg-purple-600 p-4 rounded-lg text-white shadow-lg">
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="text-[10px] font-black uppercase opacity-80">Nuevas Unidades a sumar</span>
+                              <span className="text-sm font-bold bg-white/20 px-2 rounded">
+                                + {(parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "1"))} uds
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-end border-t border-white/20 pt-2 mt-1">
+                              <span className="text-xs font-black uppercase tracking-wider">TOTAL FINAL EN UNIDADES</span>
+                              <span className="text-2xl font-black">
+                                {(parseFloat(formData.cantidad || "0") + (parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "1")))}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="bg-white p-4 rounded-lg border border-blue-200">
+                            <Label className="text-xs font-black text-blue-800 uppercase block mb-2">
+                              {formData.unidadMedida === 'kilo' ? 'Kilos a Comprar / Agregar *' : 'Unidades a Comprar / Agregar *'}
+                            </Label>
+                            <div className="flex items-center gap-3">
+                              <Input
+                                type="number"
+                                placeholder="0"
+                                value={formData.cantidadAgregar}
+                                onChange={(e) => setFormData({ ...formData, cantidadAgregar: e.target.value })}
+                                className="h-12 text-2xl border-blue-300 focus:ring-blue-500 font-black text-blue-900"
+                                required
+                              />
+                              <span className="text-sm font-bold text-gray-400 uppercase">{formData.unidadMedida === 'kilo' ? 'kg' : 'uds'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Campos para producto nuevo o edición */}
+                  {(isNewProduct || editingProduct) && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="unidadMedida">Modo de Ingreso *</Label>
+                        <select
+                          id="unidadMedida"
+                          value={formData.unidadMedida}
+                          onChange={(e) => setFormData({ ...formData, unidadMedida: e.target.value as 'unidad' | 'paquete' | 'kilo' })}
+                          required
+                          className="w-full px-3 py-2 border border-blue-300 bg-blue-50 text-blue-900 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
+                        >
+                          <option value="unidad">Por Unidad</option>
+                          <option value="paquete">Comprado por Paquete</option>
+                          <option value="kilo">Kilo</option>
+                        </select>
+                      </div>
+
+                      {formData.unidadMedida === 'paquete' ? (
+                        <div className="grid grid-cols-2 gap-4 bg-orange-50 p-4 border border-orange-200 rounded-lg">
+                          <div className="space-y-2">
+                            <Label htmlFor="cantidadPaquetes" className="text-orange-900">Cant. Paquetes *</Label>
+                            <Input
+                              id="cantidadPaquetes"
+                              type="number"
+                              placeholder="Ej: 5"
+                              value={cantidadPaquetes}
+                              onChange={(e) => setCantidadPaquetes(e.target.value)}
+                              className="border-orange-300"
+                              required
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="unidadesPorPaquete" className="text-orange-900">Unidades/Paquete *</Label>
+                            <Input
+                              id="unidadesPorPaquete"
                               type="number"
                               placeholder="Ej: 24"
                               value={unidadesPorPaquete}
                               onChange={(e) => setUnidadesPorPaquete(e.target.value)}
-                              className="h-10 border-blue-300 focus:ring-blue-500 font-bold"
+                              className="border-orange-300"
                               required
                             />
-                            <span className="text-xs font-bold text-gray-500">unidades / paquete</span>
+                          </div>
+                          <div className="col-span-2 text-xs font-bold text-orange-900 pt-2 border-t border-orange-200">
+                            = Stock total: {(parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "0"))} unidades.
                           </div>
                         </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Label htmlFor="cantidad">Cantidad *</Label>
+                          <Input
+                            id="cantidad"
+                            type="number"
+                            placeholder="10"
+                            value={formData.cantidad}
+                            onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
+                            required
+                          />
+                        </div>
+                      )}
 
-                        {unidadesPorPaquete && parseFloat(unidadesPorPaquete) > 0 && (
-                          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-dashed border-blue-100">
-                            <div className="text-center">
-                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">Paquetes Actuales</p>
-                              <p className="text-lg font-black text-purple-700">
-                                {(parseFloat(formData.cantidad || "0") / parseFloat(unidadesPorPaquete)).toFixed(2)}
-                              </p>
-                            </div>
-                            <div className="text-center">
-                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">Unidades Actuales</p>
-                              <p className="text-lg font-black text-blue-700">{formData.cantidad}</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="precioCompra">Costo *</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id="precioCompra"
+                              type="number"
+                              step="0.01"
+                              placeholder="100.00"
+                              value={formData.unidadMedida === 'paquete' ? precioPaquete : formData.precioCompra}
+                              onChange={(e) => {
+                                if(formData.unidadMedida === 'paquete') setPrecioPaquete(e.target.value);
+                                else setFormData({ ...formData, precioCompra: e.target.value });
+                              }}
+                              required
+                              className="flex-1"
+                            />
+                            <Select value={formData.monedaCompra} onValueChange={(v: any) => setFormData({...formData, monedaCompra: v})}>
+                              <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
+                              <SelectContent><SelectItem value="Bs">Bs</SelectItem><SelectItem value="$">$</SelectItem></SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        {formData.tipo === 'venta' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="precioVenta">P. Venta (Unidad) *</Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="precioVenta"
+                                type="number"
+                                step="0.01"
+                                placeholder="10.00"
+                                value={formData.precioVenta}
+                                onChange={(e) => setFormData({ ...formData, precioVenta: e.target.value })}
+                                required
+                                className="flex-1"
+                              />
+                              <Select value={formData.monedaVenta} onValueChange={(v: any) => setFormData({...formData, monedaVenta: v})}>
+                                <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
+                                <SelectContent><SelectItem value="$">$</SelectItem><SelectItem value="Bs">Bs</SelectItem></SelectContent>
+                              </Select>
                             </div>
                           </div>
                         )}
                       </div>
-
-                      <div className="bg-white p-4 rounded-lg border border-purple-200">
-                        <Label className="text-xs font-black text-purple-800 uppercase">2. ¿Cuántos Paquetes vas a agregar?</Label>
-                        <Input
-                          type="number"
-                          placeholder="Ej: 5"
-                          value={cantidadPaquetes}
-                          onChange={(e) => setCantidadPaquetes(e.target.value)}
-                          className="h-10 border-purple-300 focus:ring-purple-500 font-bold text-lg"
-                          required
-                        />
-                      </div>
-
-                      <div className="bg-purple-600 p-4 rounded-lg text-white shadow-lg transform hover:scale-[1.01] transition-transform">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-[10px] font-black uppercase opacity-80 letter-spacing-widest">Nuevas Unidades a sumar</span>
-                          <span className="text-sm font-bold bg-white/20 px-2 rounded">
-                            + {(parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "0"))} uds
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-end border-t border-white/20 pt-2 mt-1">
-                          <span className="text-xs font-black uppercase tracking-wider">TOTAL FINAL EN UNIDADES</span>
-                          <span className="text-2xl font-black">
-                            {(parseFloat(formData.cantidad || "0") + (parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "0")))}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="bg-white p-4 rounded-lg border border-blue-200">
-                        <Label className="text-xs font-black text-blue-800 uppercase tracking-wider mb-2 block">
-                          {formData.unidadMedida === 'kilo' ? 'Kilos a Comprar / Agregar *' : 'Unidades a Comprar / Agregar *'}
-                        </Label>
-                        <div className="flex items-center gap-3">
-                          <Input
-                            type="number"
-                            placeholder="0"
-                            value={formData.cantidadAgregar}
-                            onChange={(e) => setFormData({ ...formData, cantidadAgregar: e.target.value })}
-                            className="h-12 text-2xl border-blue-300 focus:ring-blue-500 font-black text-blue-900"
-                            required
-                          />
-                          <span className="text-sm font-bold text-gray-400 uppercase">{formData.unidadMedida === 'kilo' ? 'kg' : 'uds'}</span>
-                        </div>
-                      </div>
-
-                      <div className="bg-blue-600 p-4 rounded-lg text-white shadow-lg">
-                        <div className="flex justify-between items-end">
-                          <div>
-                            <p className="text-[10px] font-black uppercase opacity-70 mb-1">Stock Final Estimado</p>
-                            <p className="text-2xl font-black">
-                              {(parseFloat(formData.cantidad || "0") + parseFloat(formData.cantidadAgregar || "0"))}
-                              <span className="text-sm font-medium ml-2 opacity-80 uppercase">{formData.unidadMedida === 'kilo' ? 'kg' : 'uds'}</span>
-                            </p>
-                          </div>
-                          <TrendingUp className="h-8 w-8 opacity-20" />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Campos normales para producto nuevo o edición */}
-              {(isNewProduct || editingProduct) && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="unidadMedida">Modo de Ingreso *</Label>
-                    <select
-                      id="unidadMedida"
-                      value={formData.unidadMedida}
-                      onChange={(e) => setFormData({ ...formData, unidadMedida: e.target.value as 'unidad' | 'paquete' | 'kilo' })}
-                      required
-                      className="w-full px-3 py-2 border border-blue-300 bg-blue-50 text-blue-900 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                    >
-                      <option value="unidad">Por Unidad</option>
-                      <option value="paquete">Comprado por Paquete (múltiples unides adentro)</option>
-                      <option value="kilo">Kilo</option>
-                    </select>
-                  </div>
-
-                  {formData.unidadMedida === 'paquete' ? (
-                    <div className="grid grid-cols-2 gap-4 bg-orange-50 p-4 border border-orange-200 rounded-lg">
-                      <div className="space-y-2">
-                        <Label htmlFor="cantidadPaquetes" className="text-orange-900">Paquetes vendidos *</Label>
-                        <Input
-                          id="cantidadPaquetes"
-                          type="number"
-                          min="0"
-                          step="1"
-                          placeholder="Ej: 5"
-                          value={cantidadPaquetes}
-                          onChange={(e) => setCantidadPaquetes(e.target.value)}
-                          onInput={(e) => {
-                            const target = e.target as HTMLInputElement;
-                            if (target.value.replace(/[^0-9]/g, '').length > 7) {
-                              target.value = target.value.slice(0, 7);
-                            }
-                          }}
-                          className="border-orange-300"
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="unidadesPorPaquete" className="text-orange-900">Unidades por paquete *</Label>
-                        <Input
-                          id="unidadesPorPaquete"
-                          type="number"
-                          min="1"
-                          step="1"
-                          placeholder="Ej: 24"
-                          value={unidadesPorPaquete}
-                          onChange={(e) => setUnidadesPorPaquete(e.target.value)}
-                          onInput={(e) => {
-                            const target = e.target as HTMLInputElement;
-                            if (target.value.replace(/[^0-9]/g, '').length > 7) {
-                              target.value = target.value.slice(0, 7);
-                            }
-                          }}
-                          className="border-orange-300"
-                          required
-                        />
-                      </div>
-                      <div className="col-span-2 text-sm font-bold text-orange-900 pt-2 border-t border-orange-200">
-                        = El inventario guardará un stock de: {(parseFloat(cantidadPaquetes || "0") * parseFloat(unidadesPorPaquete || "0"))} unidades individuales.
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label htmlFor="cantidad">Cantidad *</Label>
-                      <Input
-                        id="cantidad"
-                        type="number"
-                        min="0"
-                        step="1"
-                        placeholder="10"
-                        value={formData.cantidad}
-                        onChange={(e) => setFormData({ ...formData, cantidad: e.target.value })}
-                        onInput={(e) => {
-                          const target = e.target as HTMLInputElement;
-                          if (target.value.replace(/[^0-9]/g, '').length > 7) {
-                            target.value = target.value.slice(0, 7);
-                          }
-                        }}
-                        required
-                      />
-                    </div>
+                    </>
                   )}
                 </>
               )}
-
-              {/* Precios - diferentes campos según el tipo */}
-              {formData.tipo === 'venta' ? (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="precioCompra">{formData.unidadMedida === 'paquete' ? 'Costo del PAQUETE Completo *' : 'Costo Unitario *'}</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="precioCompra"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="100.00"
-                        value={formData.unidadMedida === 'paquete' ? precioPaquete : formData.precioCompra}
-                        onChange={(e) => {
-                          if(formData.unidadMedida === 'paquete') setPrecioPaquete(e.target.value);
-                          else setFormData({ ...formData, precioCompra: e.target.value });
-                        }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLInputElement;
-                          if (target.value.replace(/[^0-9]/g, '').length > 7) {
-                            target.value = target.value.slice(0, 7);
-                          }
-                        }}
-                        required
-                        disabled={!isNewProduct && !editingProduct}
-                        className="flex-1"
-                      />
-                      <Select 
-                        value={formData.monedaCompra} 
-                        onValueChange={(value: '$' | 'Bs') => setFormData({ ...formData, monedaCompra: value })}
-                        disabled={!isNewProduct && !editingProduct}
-                      >
-                        <SelectTrigger className="w-[90px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Bs">Bs</SelectItem>
-                          <SelectItem value="$">$</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="precioVenta">Precio de Venta (Por unidad) *</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="precioVenta"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="10.00"
-                        value={formData.precioVenta}
-                        onChange={(e) => setFormData({ ...formData, precioVenta: e.target.value })}
-                        onInput={(e) => {
-                          const target = e.target as HTMLInputElement;
-                          if (target.value.replace(/[^0-9]/g, '').length > 7) {
-                            target.value = target.value.slice(0, -1);
-                          }
-                        }}
-                        required
-                        disabled={!isNewProduct && !editingProduct}
-                        className="flex-1"
-                      />
-                      <Select 
-                        value={formData.monedaVenta} 
-                        onValueChange={(value: '$' | 'Bs') => setFormData({ ...formData, monedaVenta: value })}
-                        disabled={!isNewProduct && !editingProduct}
-                      >
-                        <SelectTrigger className="w-[90px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="$">$</SelectItem>
-                          <SelectItem value="Bs">Bs</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="precioCompra">{formData.unidadMedida === 'paquete' ? 'Costo del PAQUETE Completo *' : 'Costo Unitario *'}</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="precioCompra"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="100.00"
-                      value={formData.unidadMedida === 'paquete' ? precioPaquete : formData.precioCompra}
-                      onChange={(e) => {
-                          if(formData.unidadMedida === 'paquete') setPrecioPaquete(e.target.value);
-                          else setFormData({ ...formData, precioCompra: e.target.value });
-                      }}
-                      required
-                      disabled={!isNewProduct && !editingProduct}
-                      className="flex-1"
-                    />
-                    <Select 
-                      value={formData.monedaCompra} 
-                      onValueChange={(value: '$' | 'Bs') => setFormData({ ...formData, monedaCompra: value })}
-                      disabled={!isNewProduct && !editingProduct}
-                    >
-                      <SelectTrigger className="w-[90px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Bs">Bs</SelectItem>
-                        <SelectItem value="$">$</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <p className="text-sm text-gray-500">Para servicios solo se registra el costo del objeto (material)</p>
-                </div>
-              )}
-
-              {/* Mostrar cálculo de margen solo para ventas */}
-              {formData.tipo === 'venta' && formData.precioCompra && formData.precioVenta && parseFloat(formData.precioVenta) > 0 && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <p className="text-sm text-green-900">
-                    <strong>Margen de ganancia:</strong> {' '}
-                    {(((parseFloat(formData.precioVenta) - parseFloat(formData.precioCompra)) / parseFloat(formData.precioVenta)) * 100).toFixed(2)}%
-                    {' | '}
-                    <strong>Ganancia por unidad:</strong> {formData.monedaCompra} {formatPrice(parseFloat(formData.precioVenta) - parseFloat(formData.precioCompra))}
-                  </p>
-                </div>
-              )}
             </div>
-            <DialogFooter>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => {
-                  setIsDialogOpen(false);
-                  resetForm();
-                }}
-              >
-                <X className="mr-2 h-4 w-4" />
+            <DialogFooter className="mt-8">
+              <Button type="button" variant="outline" onClick={() => { setIsDialogOpen(false); resetForm(); }}>
                 Cancelar
               </Button>
-              <Button type="submit">
-                <Save className="mr-2 h-4 w-4" />
+              <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
+                <SaveIcon className="mr-2 h-4 w-4" />
                 {editingProduct ? 'Actualizar' : (isNewProduct ? 'Guardar' : 'Agregar Stock')}
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Registrar Pérdida Dialog */}
+      <Dialog open={isLossDialogOpen} onOpenChange={setIsLossDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-red-600 px-6 py-4 text-white">
+            <DialogTitle className="text-xl font-black flex items-center gap-2 uppercase tracking-tight">
+              <AlertTriangle className="h-5 w-5" /> Registrar Baja / Pérdida
+            </DialogTitle>
+            <DialogDescription className="text-red-100 text-xs font-medium">
+              Elimina stock defectuoso, vencido o extraviado para mantener tus cuentas reales.
+            </DialogDescription>
+          </div>
+          
+          <div className="p-6 space-y-5">
+            <div className="space-y-2">
+              <Label className="text-[11px] font-black text-gray-500 uppercase tracking-widest">1. Seleccionar Producto</Label>
+              <select
+                className="w-full h-11 px-4 py-2 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-red-500 focus:ring-0 transition-all text-sm font-bold text-gray-800"
+                value={lossData.productoId}
+                onChange={(e) => setLossData({...lossData, productoId: e.target.value})}
+              >
+                <option value="">Buscar producto...</option>
+                {products.map(p => (
+                  <option key={p.id} value={p.id}>{p.nombre} (Stock: {p.cantidad})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-[11px] font-black text-gray-500 uppercase tracking-widest">2. Cantidad Perdida</Label>
+                <Input 
+                  type="number" 
+                  placeholder="0.00"
+                  className="h-11 border-2 border-gray-100 rounded-xl focus:border-red-500 font-black text-lg"
+                  value={lossData.cantidad}
+                  onChange={(e) => setLossData({...lossData, cantidad: e.target.value})}
+                />
+              </div>
+              <div className="bg-red-50 rounded-xl p-3 flex flex-col justify-center items-center border border-red-100">
+                <p className="text-[9px] font-black text-red-700 uppercase">Stock Final</p>
+                <p className="text-xl font-black text-red-900 border-t border-red-200 w-full text-center mt-1">
+                  {(() => {
+                    const p = products.find(prod => prod.id === lossData.productoId);
+                    if (!p) return '0.00';
+                    const final = p.cantidad - parseFloat(lossData.cantidad || '0');
+                    return isNaN(final) ? p.cantidad : final.toFixed(2);
+                  })()}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[11px] font-black text-gray-500 uppercase tracking-widest">3. Razón de la Pérdida</Label>
+              <Input 
+                placeholder="Ej: Producto vencido, daño en transporte, etc..."
+                className="h-11 border-2 border-gray-100 rounded-xl focus:border-red-500 font-medium"
+                value={lossData.descripcion}
+                onChange={(e) => setLossData({...lossData, descripcion: e.target.value})}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="bg-gray-50 p-4 border-t border-gray-100">
+            <Button variant="ghost" onClick={() => setIsLossDialogOpen(false)} className="font-bold text-gray-500">
+              Cancelar
+            </Button>
+            <Button onClick={handleRegisterLoss} className="bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest shadow-lg shadow-red-200">
+              Confirmar Baja
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

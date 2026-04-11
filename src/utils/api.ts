@@ -262,6 +262,35 @@ export async function deleteGasto(id: string) {
   });
 }
 // ==================== PROMOCIONES API ====================
+// --- MOVIMIENTOS DE INVENTARIO ---
+export const getMovimientos = async (userId: string) => {
+  const response = await fetch(`${API_BASE}/movimientos.php?userId=${userId}`, {
+    headers: { 'Authorization': `Bearer ${getToken()}` }
+  });
+  return await response.json();
+};
+
+export const addMovimiento = async (data: {
+  usuarioId: string;
+  productoId?: string;
+  productoNombre: string;
+  tipo: 'entrada' | 'venta' | 'consumo_servicio' | 'consumo_produccion' | 'perdida';
+  cantidad: number;
+  precioCompra?: number;
+  precioVenta?: number;
+  moneda?: 'Bs' | '$';
+  descripcion?: string;
+}) => {
+  const response = await fetch(`${API_BASE}/movimientos.php`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getToken()}`
+    },
+    body: JSON.stringify(data)
+  });
+  return await response.json();
+};
 
 export async function getPromociones(usuarioId: string) {
   return fetchAPI(`/promociones.php?usuarioId=${usuarioId}`, { method: 'GET' });

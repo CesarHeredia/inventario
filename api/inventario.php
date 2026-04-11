@@ -47,6 +47,7 @@ if ($method === 'GET') {
     }
     
     try {
+        // 1. Insertar el producto
         $stmt = $pdo->prepare("
             INSERT INTO inventario (usuarioId, nombre, descripcion, categoria, tipo, unidadMedida, cantidad, costoBolivares, monedaCompra, precioVentaDolares, monedaVenta, tasaDolar) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -66,8 +67,27 @@ if ($method === 'GET') {
             $data['monedaVenta'] ?? '$',
             $data['tasaDolar']
         ]);
+
+        $productId = $pdo->lastInsertId();
+
+        // 2. Registrar movimiento de Entrada
+        $stmtMov = $pdo->prepare("
+            INSERT INTO movimientos_inventario (usuarioId, productoId, productoNombre, tipo, cantidad, precioCompra, precioVenta, moneda, descripcion) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmtMov->execute([
+            $data['usuarioId'],
+            $productId,
+            $data['nombre'],
+            'entrada',
+            $data['cantidad'],
+            $data['costoBolivares'],
+            $data['precioVentaDolares'] ?? 0,
+            $data['monedaCompra'] ?? 'Bs',
+            "Carga inicial de inventario"
+        ]);
         
-        echo json_encode(["success" => true, "message" => "Producto agregado correctamente", "id" => $pdo->lastInsertId()]);
+        echo json_encode(["success" => true, "message" => "Producto agregado correctamente", "id" => $productId]);
     } catch (Exception $e) {
         sendError(500, "Error al agregar producto", $e->getMessage());
     }
@@ -119,8 +139,30 @@ if ($method === 'GET') {
             ]);
         } else {
             // Actualización atómica de cantidad si es lo único que llega
+            // Primero obtener la cantidad anterior para el log
+            $stmtQty = $pdo->prepare("SELECT cantidad, nombre, costoBolivares, monedaCompra FROM inventario WHERE id = ?");
+            $stmtQty->execute([$id]);
+            $currentData = $stmtQty->fetch();
+            $diff = $data['cantidad'] - $currentData['cantidad'];
+
             $stmt = $pdo->prepare("UPDATE inventario SET cantidad = ? WHERE id = ?");
             $stmt->execute([$data['cantidad'], $id]);
+
+            if ($diff > 0) {
+                $stmtMov = $pdo->prepare("
+                    INSERT INTO movimientos_inventario (usuarioId, productoId, productoNombre, tipo, cantidad, precioCompra, moneda, descripcion) 
+                    VALUES (?, ?, ?, 'entrada', ?, ?, ?, ?)
+                ");
+                $stmtMov->execute([
+                    $product['usuarioId'],
+                    $id,
+                    $currentData['nombre'],
+                    $diff,
+                    $currentData['costoBolivares'],
+                    $currentData['monedaCompra'],
+                    "Carga de stock adicional"
+                ]);
+            }
         }
         
         echo json_encode(["success" => true, "message" => "Producto actualizado correctamente"]);
